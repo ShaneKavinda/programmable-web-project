@@ -2,18 +2,20 @@
 # Production-ready WSGI server configuration for Flask application
 
 import multiprocessing
+import os
 
 # Server socket configuration
 bind = "0.0.0.0:5000"
 backlog = 2048
 
 # Worker processes configuration
-# Calculate optimal worker count: (2 * CPU_CORES) + 1
-workers = (multiprocessing.cpu_count() * 2) + 1
+# Default to a small worker count for micro instances unless overridden.
+default_workers = min(3, (multiprocessing.cpu_count() * 2) + 1)
+workers = int(os.getenv("WEB_CONCURRENCY", default_workers))
 worker_class = "sync"  # Synchronous workers suitable for I/O-bound Flask apps
 worker_connections = 1000
-timeout = 30
-keepalive = 2
+timeout = int(os.getenv("GUNICORN_TIMEOUT", "30"))
+keepalive = int(os.getenv("GUNICORN_KEEPALIVE", "2"))
 
 # Process naming and user
 proc_name = "gunicorn_flask_app"

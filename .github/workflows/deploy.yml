@@ -1,0 +1,55 @@
+name: Deploy To EC2
+
+on:
+  push:
+    branches:
+      - aws-deploy-shane
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to deploy
+        required: false
+        default: aws-deploy-shane
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+
+    steps:
+      - name: Configure SSH
+        env:
+          EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$EC2_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$EC2_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy application
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_APP_DIR: ${{ secrets.EC2_APP_DIR }}
+          EC2_SSH_PORT: ${{ secrets.EC2_SSH_PORT }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.branch }}" ]; then
+            DEPLOY_BRANCH="${{ github.event.inputs.branch }}"
+          else
+            DEPLOY_BRANCH="${{ github.ref_name }}"
+          fi
+
+          SSH_PORT="${EC2_SSH_PORT:-22}"
+          ssh -p "$SSH_PORT" "$EC2_USER@$EC2_HOST" \
+            "export APP_DIR='$EC2_APP_DIR' BRANCH='$DEPLOY_BRANCH'; bash '$EC2_APP_DIR/scripts/deploy_ec2.sh'"

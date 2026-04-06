@@ -1,0 +1,45 @@
+services:
+  flask-app:
+    build:
+      context: ..
+      dockerfile: ticket_management_system/Dockerfile
+    restart: always
+    expose:
+      - "5000"
+    env_file:
+      - .env
+    environment:
+      - FLASK_APP=ticket_management_system.app:app
+      - FLASK_ENV=production
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ..:/app:ro
+    depends_on:
+      flask-app:
+        condition: service_healthy
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  backend:
+    driver: bridge

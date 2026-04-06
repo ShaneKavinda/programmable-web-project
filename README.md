@@ -71,6 +71,9 @@ docker compose exec postgres psql -U flask_user -d flask_db
 docker compose up -d --build
 ```
 
+## Deployment
+For a GitHub Actions + AWS EC2 + RDS deployment setup, see `docs/github-actions-ec2-rds.md`.
+
 ## Project Structure (ROA)
 All application code, Docker definitions, and migrations are under `ticket_management_system/`.
 
