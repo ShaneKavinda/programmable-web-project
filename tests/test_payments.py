@@ -4,7 +4,7 @@ from decimal import Decimal
 from datetime import datetime
 from ticket_management_system.extensions import db
 from ticket_management_system.models import (
-    Flight, FlightStatus, Booking, BookingStatus, User, Roles
+    Flight, FlightStatus, Booking, BookingStatus, User
 )
 from ticket_management_system.resources.booking_service import BookingService
 from ticket_management_system.resources.user_service import UserService
@@ -247,13 +247,11 @@ class TestPaymentPermissionDenied:
                 firstname='User1',
                 lastname='One',
                 email=f'user1_{uuid.uuid4().hex[:8]}@test.com',
-                role=Roles.user
             )
             user2 = User(
                 firstname='User2',
                 lastname='Two',
                 email=f'user2_{uuid.uuid4().hex[:8]}@test.com',
-                role=Roles.user
             )
             db.session.add(user1)
             db.session.add(user2)

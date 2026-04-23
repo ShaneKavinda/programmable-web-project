@@ -3,14 +3,13 @@ import os
 from datetime import datetime, timedelta, timezone
 import jwt
 from ticket_management_system.extensions import db
-from ticket_management_system.models import User, Roles
+from ticket_management_system.models import User
 from ticket_management_system.utils import format_pagination_response
 from ticket_management_system.exceptions import (
     UserNotFoundError,
     TokenExpiredError,
     InvalidTokenError,
     EmailAlreadyExistsError,
-    InvalidRoleError,
     ResourcePermissionError,
 )
 
@@ -28,40 +27,20 @@ USER_RESOURCES = (
     'users:read:self',
     'users:update:self',
 )
-ADMIN_ONLY_RESOURCES = (
-    'flights:write',
-    'users:read:all',
-)
-
-
 class UserService:
     """Service class for user operations."""
-    @staticmethod
-    def validate_role(role_str):
-        """Validate and convert role string to Roles enum."""
-        if not role_str:
-            return Roles.user
-
-        role_str = role_str.lower()
-        if role_str == 'admin':
-            return Roles.admin
-        if role_str == 'user':
-            return Roles.user
-        raise InvalidRoleError(role_str)
-
     @staticmethod
     def email_exists(email):
         """Check if email already exists in database."""
         return User.query.filter_by(email=email).first() is not None
 
     @staticmethod
-    def create_user(firstname, lastname, email, role=Roles.user):
+    def create_user(firstname, lastname, email):
         """Create a new user identity."""
         new_user = User(
             firstname=firstname,
             lastname=lastname,
             email=email,
-            role=role
         )
 
         db.session.add(new_user)
@@ -70,12 +49,9 @@ class UserService:
         return new_user
 
     @staticmethod
-    def get_permitted_resources(user):
+    def get_permitted_resources(_user):
         """Return the resource scopes allowed for a user."""
-        resources = list(USER_RESOURCES)
-        if user.role == Roles.admin:
-            resources.extend(ADMIN_ONLY_RESOURCES)
-        return resources
+        return list(USER_RESOURCES)
 
     @staticmethod
     def token_expires_in_seconds():
@@ -89,7 +65,6 @@ class UserService:
         token_payload = {
             'user_id': str(user.id),
             'email': user.email,
-            'role': user.role.name,
             'permitted_resources': list(permitted_resources or UserService.get_permitted_resources(user)),
             'exp': issued_at + timedelta(seconds=JWT_EXPIRATION_SECONDS),
             'iat': issued_at
@@ -107,7 +82,6 @@ class UserService:
                 'firstname': user.firstname,
                 'lastname': user.lastname,
                 'email': user.email,
-                'role': user.role.name,
                 'created_at': user.created_at.isoformat()
             }
         }
@@ -186,7 +160,6 @@ class UserService:
                 'firstname': user.firstname,
                 'lastname': user.lastname,
                 'email': user.email,
-                'role': user.role.name,
                 'created_at': user.created_at.isoformat(),
                 'updated_at': user.updated_at.isoformat()
             }

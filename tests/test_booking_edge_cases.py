@@ -5,7 +5,7 @@ from decimal import Decimal
 import pytest
 
 from ticket_management_system.extensions import db
-from ticket_management_system.models import Flight, FlightStatus, User, Roles
+from ticket_management_system.models import Flight, FlightStatus, User
 from ticket_management_system.resources.booking_service import BookingService
 
 
@@ -37,7 +37,6 @@ class TestBookingServiceEdgeCases:
                 firstname='Booking',
                 lastname='User',
                 email='booking@test.com',
-                role=Roles.user
             )
             db.session.add(user)
             db.session.commit()

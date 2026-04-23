@@ -1,5 +1,8 @@
 """Business logic for flight operations."""
 from datetime import datetime, timedelta
+
+from sqlalchemy.orm import selectinload
+
 from ticket_management_system.extensions import db
 from ticket_management_system.models import Flight, FlightStatus
 from ticket_management_system.exceptions import FlightAlreadyExistsError
@@ -106,14 +109,17 @@ class FlightService:
         return format_pagination_response('flights', flights_data, pagination)
 
     @staticmethod
-    def get_flight_by_id(flight_id):
-        """Get flight by ID."""
-        return Flight.query.filter_by(id=flight_id).first()
+    def get_flight_by_id(flight_id, load_bookings=False):
+        """Get flight by ID. Optionally eager-load bookings for list payloads."""
+        query = Flight.query.filter_by(id=flight_id)
+        if load_bookings:
+            query = query.options(selectinload(Flight.bookings))
+        return query.first()
 
     @staticmethod
-    def format_flight_detail(flight):
+    def format_flight_detail(flight, include_bookings=False):
         """Format flight details for response."""
-        return {
+        data = {
             'id': str(flight.id),
             'flight_code': flight.flight_code,
             'origin_airport': flight.origin_airport,
@@ -125,6 +131,16 @@ class FlightService:
             'created_at': flight.created_at.isoformat(),
             'updated_at': flight.updated_at.isoformat()
         }
+        if include_bookings:
+            data['bookings'] = [
+                {
+                    'id': str(b.id),
+                    'user_id': str(b.user_id) if b.user_id else None,
+                    'booking_status': b.booking_status.name,
+                }
+                for b in flight.bookings
+            ]
+        return data
 
     @staticmethod
     def create_flight(  # pylint: disable=too-many-positional-arguments,too-many-arguments

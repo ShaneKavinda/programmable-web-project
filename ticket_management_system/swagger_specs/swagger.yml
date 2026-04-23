@@ -1,7 +1,7 @@
 swagger: '2.0'
 info:
   title: Flight Management System API
-  description: RESTful API for managing flights and bookings with scoped user-ID tokens
+  description: RESTful API for managing flights, bookings, payments, users, and auxiliary notification logs
   version: 1.0.0
 basePath: /api
 host: localhost:8080
@@ -20,6 +20,11 @@ securityDefinitions:
     description: >-
       JWT Authorization header using the Bearer scheme.
       Example: "Authorization: Bearer {token}"
+  ApiKeyAuth:
+    type: apiKey
+    name: x-api-key
+    in: header
+    description: Admin API key sent in x-api-key header.
 
 parameters:
   PageParam:
@@ -150,11 +155,6 @@ definitions:
         type: string
       email:
         type: string
-      role:
-        type: string
-        enum:
-        - user
-        - admin
       created_at:
         type: string
         format: date-time
@@ -442,32 +442,6 @@ paths:
           examples:
             application/json: *not_found_error_example
 
-  /users/register:
-    post:
-      summary: Legacy registration removed
-      description: Password registration has been removed. Use /users/token with an existing user ID.
-      operationId: registerUserRemoved
-      tags:
-      - Authentication
-      responses:
-        410:
-          description: Registration removed
-          schema:
-            $ref: '#/definitions/Error'
-
-  /users/login:
-    post:
-      summary: Legacy login removed
-      description: Password login has been removed. Use /users/token with an existing user ID.
-      operationId: loginUserRemoved
-      tags:
-      - Authentication
-      responses:
-        410:
-          description: Login removed
-          schema:
-            $ref: '#/definitions/Error'
-
   /users/me:
     get:
       summary: Get token user profile
@@ -551,12 +525,12 @@ paths:
   /users/:
     get:
       summary: List all users (Admin only)
-      description: Get a paginated list of all users in the system. Only administrators can access this endpoint.
+      description: Get a paginated list of all users in the system. Access requires admin API key.
       operationId: listUsers
       tags:
       - Users
       security:
-      - Bearer: []
+      - ApiKeyAuth: []
       parameters:
       - $ref: '#/parameters/PageParam'
       - $ref: '#/parameters/PerPageParam'
@@ -572,7 +546,7 @@ paths:
           examples:
             application/json: *auth_error_example
         403:
-          description: Forbidden - Admin privileges required
+          description: Forbidden - Invalid API key
           schema:
             $ref: '#/definitions/ForbiddenError'
           examples:
@@ -587,19 +561,11 @@ paths:
       operationId: listAirports
       tags:
       - Flights
-      security:
-      - Bearer: []
       responses:
         200:
           description: List of airports
           schema:
             $ref: '#/definitions/AirportListResponse'
-        401:
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/AuthError'
-          examples:
-            application/json: *auth_error_example
 
   /flights/search:
     get:
@@ -608,8 +574,6 @@ paths:
       operationId: searchFlights
       tags:
       - Flights
-      security:
-      - Bearer: []
       parameters:
       - name: status
         in: query
@@ -672,22 +636,16 @@ paths:
             $ref: '#/definitions/ValidationError'
           examples:
             application/json: *validation_error_example
-        401:
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/AuthError'
-          examples:
-            application/json: *auth_error_example
 
   /flights:
     post:
       summary: Add a new flight (Admin only)
-      description: Create a new flight in the system. Only administrators can add flights.
+      description: Create a new flight in the system. Access requires admin API key.
       operationId: addFlight
       tags:
       - Flights
       security:
-      - Bearer: []
+      - ApiKeyAuth: []
       parameters:
       - in: body
         name: body
@@ -748,7 +706,7 @@ paths:
           examples:
             application/json: *auth_error_example
         403:
-          description: Forbidden - Admin privileges required
+          description: Forbidden - Invalid API key
           schema:
             $ref: '#/definitions/ForbiddenError'
           examples:
@@ -767,8 +725,6 @@ paths:
       operationId: getFlightById
       tags:
       - Flights
-      security:
-      - Bearer: []
       parameters:
       - $ref: '#/parameters/FlightIdParam'
       responses:
@@ -779,12 +735,6 @@ paths:
             properties:
               flight:
                 $ref: '#/definitions/Flight'
-        401:
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/AuthError'
-          examples:
-            application/json: *auth_error_example
         404:
           description: Flight not found
           schema:
@@ -793,12 +743,12 @@ paths:
             application/json: *not_found_error_example
     delete:
       summary: Delete a flight (Admin only)
-      description: Delete a flight from the system. Only administrators can delete flights.
+      description: Delete a flight from the system. Access requires admin API key.
       operationId: deleteFlight
       tags:
       - Flights
       security:
-      - Bearer: []
+      - ApiKeyAuth: []
       parameters:
       - $ref: '#/parameters/FlightIdParam'
       responses:
@@ -816,7 +766,7 @@ paths:
           examples:
             application/json: *auth_error_example
         403:
-          description: Forbidden - Admin privileges required
+          description: Forbidden - Invalid API key
           schema:
             $ref: '#/definitions/ForbiddenError'
           examples:
@@ -829,12 +779,12 @@ paths:
             application/json: *not_found_error_example
     put:
       summary: Update a flight (Admin only)
-      description: Update flight details. Only administrators can update flights.
+      description: Update flight details. Access requires admin API key.
       operationId: updateFlight
       tags:
       - Flights
       security:
-      - Bearer: []
+      - ApiKeyAuth: []
       parameters:
       - $ref: '#/parameters/FlightIdParam'
       - in: body
@@ -888,7 +838,7 @@ paths:
           examples:
             application/json: *auth_error_example
         403:
-          description: Forbidden - Admin privileges required
+          description: Forbidden - Invalid API key
           schema:
             $ref: '#/definitions/ForbiddenError'
           examples:
@@ -983,7 +933,7 @@ paths:
             application/json: *conflict_error_example
     get:
       summary: List bookings
-      description: List bookings with pagination. Regular token users receive only their own bookings; admins receive all bookings.
+      description: List bookings with pagination for the authenticated token owner.
       operationId: listBookings
       tags:
       - Bookings
@@ -1010,7 +960,7 @@ paths:
           examples:
             application/json: *auth_error_example
         403:
-          description: Forbidden - missing bookings:read permission
+          description: Forbidden - missing required token scope
           schema:
             $ref: '#/definitions/ForbiddenError'
           examples:
@@ -1019,7 +969,7 @@ paths:
   /bookings/{booking_id}:
     get:
       summary: Get booking details
-      description: Retrieve details of a specific booking. Regular token users can access their own bookings; admins can access any booking.
+      description: Retrieve details of a specific booking owned by the authenticated token user.
       operationId: getBooking
       tags:
       - Bookings
@@ -1055,7 +1005,7 @@ paths:
             application/json: *not_found_error_example
     put:
       summary: Update booking status
-      description: Update the status of an existing booking. Regular token users can update their own bookings; admins can update any booking.
+      description: Update the status of an existing booking owned by the authenticated token user.
       operationId: updateBooking
       tags:
       - Bookings
@@ -1115,12 +1065,15 @@ paths:
             application/json: *conflict_error_example
     delete:
       summary: Cancel booking
-      description: Cancel an existing booking by setting its status to cancelled. Regular token users can cancel their own bookings; admins can cancel any booking.
+      description: >-
+        Cancel an existing booking. Use Bearer token with bookings:write as the owner,
+        or send x-api-key (admin API key) to cancel any user's booking (no Bearer required).
       operationId: cancelBooking
       tags:
       - Bookings
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       parameters:
       - $ref: '#/parameters/BookingIdParam'
       responses:
@@ -1135,7 +1088,7 @@ paths:
           examples:
             application/json: *auth_error_example
         403:
-          description: Forbidden - booking does not belong to the token user
+          description: Forbidden — booking does not belong to the token user, or invalid x-api-key when cancelling as admin
           schema:
             $ref: '#/definitions/ForbiddenError'
           examples:
@@ -1254,3 +1207,48 @@ paths:
             $ref: '#/definitions/ConflictError'
           examples:
             application/json: *conflict_error_example
+
+  /aux/notifications:
+    get:
+      summary: List auxiliary notification logs (Admin only)
+      description: Fetch notification logs proxied from the notification auxiliary service. Access requires admin API key.
+      operationId: listAuxiliaryNotifications
+      tags:
+      - Auxiliary
+      security:
+      - ApiKeyAuth: []
+      parameters:
+      - name: booking_id
+        in: query
+        type: string
+        format: uuid
+        description: Optional booking ID filter
+      - name: limit
+        in: query
+        type: integer
+        default: 50
+        minimum: 1
+        maximum: 200
+        description: Maximum number of notification records to return
+      responses:
+        200:
+          description: Notification logs fetched successfully
+          schema:
+            type: object
+            additionalProperties: true
+        400:
+          description: Invalid limit parameter
+          schema:
+            $ref: '#/definitions/Error'
+        401:
+          description: Missing x-api-key header
+          schema:
+            $ref: '#/definitions/AuthError'
+        403:
+          description: Forbidden - Invalid API key
+          schema:
+            $ref: '#/definitions/ForbiddenError'
+        503:
+          description: Auxiliary service unavailable
+          schema:
+            $ref: '#/definitions/Error'

@@ -83,7 +83,6 @@ class TestGetCurrentUserEndpoint:
             assert 'firstname' in data['user']
             assert 'lastname' in data['user']
             assert 'email' in data['user']
-            assert 'role' in data['user']
             assert 'created_at' in data['user']
             assert 'updated_at' in data['user']
 
@@ -174,25 +173,25 @@ class TestGetAllUsersEndpoint:
             assert data['pagination']['has_prev'] is True
 
     def test_get_all_users_as_regular_user(self, client, app, auth_headers):
-        """Test getting all users as regular user (should fail)."""
+        """Token-only access should fail because API key is required."""
         with app.app_context():
             response = client.get('/api/users/', headers=auth_headers)
 
-            assert response.status_code == 403
+            assert response.status_code == 401
             data = response.get_json()
-            assert data['error'] == 'Forbidden'
-            assert 'users:read:all' in data['message']
+            assert data['error'] == 'Unauthorized'
+            assert 'x-api-key' in data['message']
 
     def test_get_all_users_no_token(self, client):
-        """Test getting all users without token."""
+        """Admin endpoint requires API key, not bearer token."""
         response = client.get('/api/users/')
 
         assert response.status_code == 401
         data = response.get_json()
-        assert data['error'] == 'Authentication required'
+        assert data['error'] == 'Unauthorized'
 
     def test_get_all_users_invalid_token(self, client):
-        """Test getting all users with invalid token."""
+        """Invalid token is irrelevant without x-api-key."""
         headers = {'Authorization': 'Bearer invalid.token'}
         response = client.get('/api/users/', headers=headers)
 
@@ -404,7 +403,6 @@ class TestUpdateCurrentUserEndpoint:
         # Store original values
         original_lastname = test_user.lastname
         original_email = test_user.email
-        original_role = test_user.role
 
         # Update only firstname
         response = client.patch('/api/users/me',
@@ -418,7 +416,6 @@ class TestUpdateCurrentUserEndpoint:
         assert data['user']['firstname'] == 'OnlyFirstChanged'
         assert data['user']['lastname'] == original_lastname
         assert data['user']['email'] == original_email
-        assert data['user']['role'] == original_role.name
 
     def test_update_updates_timestamp(self, client, auth_headers, test_user):
         """Test that update modifies the updated_at timestamp."""

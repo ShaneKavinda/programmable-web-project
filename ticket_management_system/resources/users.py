@@ -1,8 +1,10 @@
 """User identity and scoped-token API endpoints."""
+import logging
+import os
+import secrets
 from functools import wraps
 from flask import Blueprint, request, jsonify, make_response
 from marshmallow import ValidationError
-from ticket_management_system.models import Roles
 from ticket_management_system.utils import handle_validation_error, handle_general_error, handle_conflict_error
 from ticket_management_system.resources.user_service import UserService
 from ticket_management_system.static.schema.user_schemas import UserProfileUpdateSchema, UserTokenRequestSchema
@@ -15,6 +17,15 @@ from ticket_management_system.exceptions import (
 )
 
 user_bp = Blueprint('users', __name__, url_prefix='/api/users')
+logger = logging.getLogger(__name__)
+
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "").strip()
+if not ADMIN_API_KEY:
+    ADMIN_API_KEY = secrets.token_urlsafe(32)
+    logger.warning(
+        "ADMIN_API_KEY is not set. Generated temporary key for this process: %s",
+        ADMIN_API_KEY,
+    )
 
 
 def _attach_refreshed_token(response, user):
@@ -169,16 +180,22 @@ def login_removed():
 
 
 def admin_required(f):
-    """Decorator to require admin role."""
+    """Decorator to require admin API key via x-api-key header."""
     @wraps(f)
-    def decorated(token_user, *args, **kwargs):
-        if token_user.role != Roles.admin:
+    def decorated(*args, **kwargs):
+        api_key = request.headers.get("x-api-key", "").strip()
+        if not api_key:
+            return jsonify({
+                'error': 'Unauthorized',
+                'message': 'Missing x-api-key header'
+            }), 401
+        if api_key != ADMIN_API_KEY:
             return jsonify({
                 'error': 'Forbidden',
-                'message': 'Admin privileges required'
+                'message': 'Invalid API key'
             }), 403
 
-        return f(token_user, *args, **kwargs)
+        return f(*args, **kwargs)
 
     return decorated
 
@@ -246,9 +263,8 @@ def update_token_user(token_user):  # pylint: disable=too-many-return-statements
 
 
 @user_bp.route('/', methods=['GET'])
-@token_required('users:read:all')
 @admin_required
-def get_all_users(_token_user):
+def get_all_users():
     """Get paginated list of all users (admin only)."""
     # Get pagination parameters from query string
     page = request.args.get('page', 1, type=int)

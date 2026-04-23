@@ -33,22 +33,31 @@ export const AppShell = () => {
             <NavLink to="/profile" style={navLinkStyle}>
               Profile
             </NavLink>
-            {user?.role === "admin" && (
-              <NavLink to="/admin" style={navLinkStyle}>
-                Admin
-              </NavLink>
+            <NavLink to="/access-account" style={navLinkStyle}>
+              Access Account
+            </NavLink>
+            <NavLink to="/admin" style={navLinkStyle}>
+              Admin
+            </NavLink>
+            {user ? (
+              <>
+                <Typography variant="body2">{user.firstname}</Typography>
+                <Button
+                  color="inherit"
+                  size="small"
+                  variant="outlined"
+                  onClick={logout}
+                  startIcon={<LogoutIcon />}
+                  sx={{ borderColor: "rgba(255,255,255,0.5)", color: "#fff" }}
+                >
+                  Logout
+                </Button>
+              </>
+            ) : (
+              <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                Guest
+              </Typography>
             )}
-            <Typography variant="body2">{user?.firstname}</Typography>
-            <Button
-              color="inherit"
-              size="small"
-              variant="outlined"
-              onClick={logout}
-              startIcon={<LogoutIcon />}
-              sx={{ borderColor: "rgba(255,255,255,0.5)", color: "#fff" }}
-            >
-              Logout
-            </Button>
           </Stack>
         </Toolbar>
       </AppBar>

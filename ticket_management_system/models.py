@@ -11,12 +11,6 @@ def _utcnow():
     """Return current UTC time as a timezone-aware datetime."""
     return datetime.now(timezone.utc)
 
-# pylint: disable=invalid-name
-class Roles(enum.Enum):
-    """User roles enum."""
-    admin = 1
-    user = 2
-
 # pylint: disable=too-few-public-methods
 class User(db.Model):
     """User model for identity and authorization."""
@@ -26,7 +20,6 @@ class User(db.Model):
     firstname = db.Column(db.String(60), nullable=False)
     lastname = db.Column(db.String(60), nullable=False)
     email = db.Column(db.String(255), nullable=False, unique=True)
-    role = db.Column(Enum(Roles), nullable=False, default=Roles.user)
     created_at = db.Column(db.DateTime, nullable=False, default=_utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
 

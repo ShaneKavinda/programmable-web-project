@@ -7,6 +7,7 @@ from flask import Blueprint, request, jsonify
 import uuid
 from ticket_management_system.extensions import db
 from ticket_management_system.models import Booking, BookingStatus
+from ticket_management_system.resources.notification_client import publish_booking_event
 from ticket_management_system.resources.users import token_required
 
 payment_bp = Blueprint('payments', __name__, url_prefix='/api/payments')
@@ -102,10 +103,21 @@ def process_payment(token_user):  # pylint: disable=too-many-return-statements
         booking.booking_status = BookingStatus.paid
 
         db.session.commit()
+        publish_booking_event(
+            event_type="booking_paid",
+            booking_id=str(booking.id),
+            user_id=str(token_user.id),
+            user_email=token_user.email,
+            payload={
+                "flight_id": str(booking.flight_id),
+                "total_price": str(booking.total_price),
+                "booking_status": booking.booking_status.name,
+            },
+        )
 
         return jsonify({
             "message": "Payment successful. Booking confirmed.",
-            "booking_number": booking.id,
+            "booking_number": str(booking.id),
             "status": booking.booking_status.name
         }), 200
 

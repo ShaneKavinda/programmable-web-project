@@ -15,7 +15,7 @@ from ticket_management_system.exceptions import (
     SeatUnavailableError,
 )
 from ticket_management_system.extensions import db
-from ticket_management_system.models import BookingStatus, Flight, FlightStatus, Roles, SeatClass, User
+from ticket_management_system.models import BookingStatus, Flight, FlightStatus, SeatClass, User
 from ticket_management_system.resources.booking_service import BookingService
 
 
@@ -27,7 +27,6 @@ def booking_user(app):
             firstname="Booking",
             lastname="Tester",
             email="booking.service@test.com",
-            role=Roles.user
         )
         db.session.add(user)
         db.session.commit()

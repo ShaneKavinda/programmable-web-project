@@ -32,7 +32,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     localStorage.removeItem("auth_user");
     setToken(null);
     setUser(null);
-    navigate("/login", { replace: true });
+    navigate("/flights", { replace: true });
   };
 
   const value: AuthContextType = {

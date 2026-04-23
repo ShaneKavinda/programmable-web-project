@@ -1,16 +1,16 @@
-export type UserRole = "admin" | "user";
-
 export type User = {
   id: string;
   firstname: string;
   lastname: string;
   email: string;
-  role: UserRole;
 };
 
 export type AuthResponse = {
   user: User;
   token: string;
+  token_type?: string;
+  expires_in?: number;
+  permitted_resources?: string[];
   message?: string;
 };
 
@@ -26,7 +26,9 @@ export type Flight = {
 };
 
 export type PassengerInput = {
-  passenger_name: string;
+  passenger_fname: string;
+  passenger_lname: string;
+  email?: string;
   passenger_passport_num: string;
   seat_num: string;
   seat_class: "economy" | "business" | "first";

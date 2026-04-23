@@ -10,6 +10,10 @@ import {
   CardContent,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   FormControl,
   InputLabel,
@@ -20,27 +24,34 @@ import {
   StepLabel,
   Stepper,
   TextField,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ApiErrorSnackbar } from "../components/ApiErrorSnackbar";
+import { useAuth } from "../context/AuthContext";
 import { formatDateTimeDdMmYyyy } from "../lib/formatDate";
 import { pickUniqueAvailableSeats } from "../lib/pickSeats";
 import { createBooking } from "../services/bookings";
+import { issueTokenByUserId } from "../services/auth";
 import type { Flight, PassengerInput } from "../types";
 
 const STEPS = ["Flight", "Passengers", "Review"];
 
 type PassengerDraft = {
-  passenger_name: string;
+  passenger_fname: string;
+  passenger_lname: string;
+  email: string;
   passenger_passport_num: string;
   seat_class: PassengerInput["seat_class"];
 };
 
 const emptyPassenger = (): PassengerDraft => ({
-  passenger_name: "",
+  passenger_fname: "",
+  passenger_lname: "",
+  email: "",
   passenger_passport_num: "",
   seat_class: "economy",
 });
@@ -56,6 +67,7 @@ export const BookingWizardPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
+  const { setAuth } = useAuth();
 
   const flight = location.state?.flight as Flight | undefined;
 
@@ -65,6 +77,10 @@ export const BookingWizardPage = () => {
   const [passengerError, setPassengerError] = useState<string | null>(null);
   const [seatPickError, setSeatPickError] = useState<string | null>(null);
   const [isPickingSeats, setIsPickingSeats] = useState(false);
+  const [bookingSuccess, setBookingSuccess] = useState<{
+    userId: string | null;
+    bookingId: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!flight?.id) {
@@ -79,7 +95,9 @@ export const BookingWizardPage = () => {
         throw new Error("Seats are not assigned yet. Go back one step.");
       }
       const payload: PassengerInput[] = passengers.map((p, i) => ({
-        passenger_name: p.passenger_name.trim(),
+        passenger_fname: p.passenger_fname.trim(),
+        passenger_lname: p.passenger_lname.trim(),
+        email: p.email.trim() || undefined,
         passenger_passport_num: p.passenger_passport_num.trim(),
         seat_num: assignedSeats[i],
         seat_class: p.seat_class,
@@ -89,22 +107,43 @@ export const BookingWizardPage = () => {
         passengers: payload,
       });
     },
-    onSuccess: () => {
+    onSuccess: async (booking) => {
       queryClient.invalidateQueries({ queryKey: ["bookings"] });
-      navigate("/bookings", { replace: true });
+      const userId = booking.user_id?.trim() ?? null;
+      if (userId) {
+        try {
+          const auth = await issueTokenByUserId(userId);
+          setAuth(auth.token, auth.user);
+        } catch {
+          // Keep booking creation successful even if token bootstrap fails.
+        }
+      }
+      setBookingSuccess({
+        userId,
+        bookingId: String(booking.id),
+      });
     },
   });
+
+  const closeSuccessAndGoToBookings = () => {
+    setBookingSuccess(null);
+    navigate("/bookings", { replace: true });
+  };
 
   const validatePassengers = (): boolean => {
     setPassengerError(null);
     for (let i = 0; i < passengers.length; i += 1) {
       const p = passengers[i];
-      if (!p.passenger_name.trim()) {
-        setPassengerError(`Passenger ${i + 1}: name is required.`);
+      if (!p.passenger_fname.trim()) {
+        setPassengerError(`Passenger ${i + 1}: first name is required.`);
         return false;
       }
-      if (p.passenger_name.trim().length > 50) {
-        setPassengerError(`Passenger ${i + 1}: name is too long (max 50).`);
+      if (!p.passenger_lname.trim()) {
+        setPassengerError(`Passenger ${i + 1}: last name is required.`);
+        return false;
+      }
+      if (p.passenger_fname.trim().length > 50 || p.passenger_lname.trim().length > 50) {
+        setPassengerError(`Passenger ${i + 1}: first/last name is too long (max 50).`);
         return false;
       }
       if (!p.passenger_passport_num.trim()) {
@@ -113,6 +152,15 @@ export const BookingWizardPage = () => {
       }
       if (p.passenger_passport_num.trim().length > 12) {
         setPassengerError(`Passenger ${i + 1}: passport number is too long (max 12).`);
+        return false;
+      }
+      const email = p.email.trim();
+      if (i === 0 && !email) {
+        setPassengerError("Traveler 1: email is required for booking ownership.");
+        return false;
+      }
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        setPassengerError(`Passenger ${i + 1}: enter a valid email.`);
         return false;
       }
     }
@@ -166,7 +214,8 @@ export const BookingWizardPage = () => {
     if (!flight) return null;
     const basePrice = Number(flight.base_price);
     return passengers.map((p, i) => ({
-      label: p.passenger_name.trim() || `Passenger ${i + 1}`,
+      label: `${p.passenger_fname.trim()} ${p.passenger_lname.trim()}`.trim() || `Passenger ${i + 1}`,
+      email: p.email.trim() || "—",
       passport: p.passenger_passport_num.trim(),
       seat_class: p.seat_class,
       seat: assignedSeats[i] ?? "—",
@@ -185,6 +234,81 @@ export const BookingWizardPage = () => {
 
   return (
     <Stack spacing={3} maxWidth={720} sx={{ mx: "auto" }}>
+      <Dialog
+        open={Boolean(bookingSuccess)}
+        onClose={(_event, reason) => {
+          if (reason === "backdropClick") return;
+          closeSuccessAndGoToBookings();
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Booking confirmed</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2}>
+            <Typography variant="body1">
+              Your booking was created successfully. You are signed in and can open My Bookings.
+            </Typography>
+            {bookingSuccess?.userId ? (
+              <>
+                <Alert severity="info">
+                  Save your user ID — you will need it on the Access Account page if you sign out or use another
+                  browser.
+                </Alert>
+                <Typography variant="caption" color="text.secondary">
+                  User ID
+                </Typography>
+                <Box
+                  sx={{
+                    p: 1.5,
+                    borderRadius: 1,
+                    bgcolor: "action.hover",
+                    border: 1,
+                    borderColor: "divider",
+                    fontFamily: "monospace",
+                    fontSize: "0.85rem",
+                    wordBreak: "break-all",
+                  }}
+                >
+                  <Tooltip title="Click to copy">
+                    <span
+                      style={{ cursor: "pointer" }}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => navigator.clipboard?.writeText(bookingSuccess.userId!)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          navigator.clipboard?.writeText(bookingSuccess.userId!);
+                        }
+                      }}
+                    >
+                      {bookingSuccess.userId}
+                    </span>
+                  </Tooltip>
+                </Box>
+              </>
+            ) : (
+              <Alert severity="warning">
+                No user ID was returned for this booking. You can still use My Bookings while this session is active, or
+                use Access Account if you have your user ID from elsewhere.
+              </Alert>
+            )}
+            <Typography variant="body2" color="text.secondary">
+              Booking reference:{" "}
+              <Box component="span" sx={{ fontFamily: "monospace" }}>
+                {bookingSuccess?.bookingId}
+              </Box>
+            </Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button variant="contained" onClick={closeSuccessAndGoToBookings}>
+            Go to my bookings
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <ApiErrorSnackbar error={bookingMutation.error} />
       <Typography variant="h5" fontWeight={700}>
         New booking
@@ -264,9 +388,26 @@ export const BookingWizardPage = () => {
                 <Stack spacing={2}>
                   <TextField
                     required
-                    label="Full name"
-                    value={p.passenger_name}
-                    onChange={(e) => updatePassenger(index, { passenger_name: e.target.value })}
+                    label="First name"
+                    value={p.passenger_fname}
+                    onChange={(e) => updatePassenger(index, { passenger_fname: e.target.value })}
+                    fullWidth
+                    disabled={isPickingSeats}
+                  />
+                  <TextField
+                    required
+                    label="Last name"
+                    value={p.passenger_lname}
+                    onChange={(e) => updatePassenger(index, { passenger_lname: e.target.value })}
+                    fullWidth
+                    disabled={isPickingSeats}
+                  />
+                  <TextField
+                    required={index === 0}
+                    label={index === 0 ? "Email (required for owner)" : "Email (optional)"}
+                    type="email"
+                    value={p.email}
+                    onChange={(e) => updatePassenger(index, { email: e.target.value })}
                     fullWidth
                     disabled={isPickingSeats}
                   />
@@ -324,6 +465,9 @@ export const BookingWizardPage = () => {
                   <Typography fontWeight={600}>{row.label}</Typography>
                   <Typography variant="body2" color="text.secondary">
                     Passport: {row.passport} · {row.seat_class} · Seat {row.seat}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Email: {row.email}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     Ticket price: EUR {formatPrice(row.ticket_price)}

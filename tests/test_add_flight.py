@@ -45,7 +45,7 @@ class TestAddFlightEndpoint:
                 db.session.commit()
 
     def test_add_flight_as_regular_user(self, client, app, auth_headers):
-        """Test that regular users cannot add flights."""
+        """Test that bearer token alone cannot add flights without x-api-key."""
         with app.app_context():
             future_date = datetime.now() + timedelta(days=30)
             flight_data = {
@@ -61,10 +61,10 @@ class TestAddFlightEndpoint:
                                  json=flight_data,
                                  headers=auth_headers)
 
-            assert response.status_code == 403
+            assert response.status_code == 401
             data = response.get_json()
             assert 'error' in data
-            assert 'Forbidden' in data['error']
+            assert 'Unauthorized' in data['error']
 
     def test_add_flight_without_auth(self, client, app):
         """Test that unauthenticated requests are rejected."""

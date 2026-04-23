@@ -7,6 +7,7 @@ services:
     env_file:
       - .env
     environment:
+      TZ: Europe/Helsinki
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -20,6 +21,35 @@ services:
       timeout: 5s
       retries: 5
 
+  notification-auxiliary-service:
+    build:
+      context: ../notification-auxiliary-service
+      dockerfile: Dockerfile
+    restart: always
+    expose:
+      - "5051"
+    environment:
+      - TZ=Europe/Helsinki
+      - PORT=5051
+      - AUX_DB_PATH=/app/data/notifications.db
+      - BOOKING_SWEEP_ENABLED=${AUX_BOOKING_SWEEP_ENABLED:-true}
+      - BOOKING_SWEEP_INTERVAL_SECONDS=${AUX_BOOKING_SWEEP_INTERVAL_SECONDS:-600}
+      - MAIN_API_BASE_URL=http://flask-app:5000
+      - MAIN_API_ADMIN_API_KEY=${AUX_MAIN_API_ADMIN_API_KEY:-${ADMIN_API_KEY:-}}
+    volumes:
+      - notification_aux_data:/app/data
+    depends_on:
+      flask-app:
+        condition: service_healthy
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5051/health', timeout=3)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
   flask-app:
     build:
       context: ..
@@ -31,9 +61,13 @@ services:
     env_file:
       - .env
     environment:
+      - TZ=Europe/Helsinki
       - FLASK_APP=ticket_management_system.app:app
       - FLASK_ENV=production
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - ADMIN_API_KEY=${ADMIN_API_KEY:-}
+      - NOTIFICATION_AUX_BASE_URL=http://notification-auxiliary-service:5051
+      - NOTIFICATION_AUX_TIMEOUT_SEC=1.5
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,6 +84,8 @@ services:
   nginx:
     image: nginx:alpine
     restart: always
+    environment:
+      TZ: Europe/Helsinki
     ports:
       - "8080:80"
     volumes:
@@ -68,6 +104,7 @@ services:
 
 volumes:
   postgres_data:
+  notification_aux_data:
 
 networks:
   backend:

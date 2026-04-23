@@ -10,7 +10,6 @@ from ticket_management_system.models import (
     BookingStatus,
     Flight,
     FlightStatus,
-    Roles,
     SeatClass,
     Ticket,
     User,
@@ -37,37 +36,31 @@ def create_users():
             firstname="Admin",
             lastname="User",
             email="admin@flightsystem.com",
-            role=Roles.admin
         ),
         User(
             firstname="John",
             lastname="Doe",
             email="john.doe@example.com",
-            role=Roles.user
         ),
         User(
             firstname="Jane",
             lastname="Smith",
             email="jane.smith@example.com",
-            role=Roles.user
         ),
         User(
             firstname="Mike",
             lastname="Johnson",
             email="mike.johnson@example.com",
-            role=Roles.user
         ),
         User(
             firstname="Sarah",
             lastname="Williams",
             email="sarah.williams@example.com",
-            role=Roles.user
         ),
         User(
             firstname="David",
             lastname="Brown",
             email="david.brown@example.com",
-            role=Roles.user
         )
     ]
 

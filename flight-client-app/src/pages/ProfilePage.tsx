@@ -105,7 +105,7 @@ export const ProfilePage = () => {
             )}
           />
           <Typography variant="body2" color="text.secondary">
-            Role: {user?.role}
+            User ID: {user?.id}
           </Typography>
           <Button
             variant="contained"

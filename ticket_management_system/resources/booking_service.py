@@ -11,8 +11,6 @@ from ticket_management_system.exceptions import (
     UserNotFoundError,
 )
 
-from ticket_management_system.models import Roles
-
 
 class BookingService:
     """Service class for booking operations."""
@@ -121,7 +119,6 @@ class BookingService:
                         firstname=firstname,
                         lastname=lastname,
                         email=email,
-                        role=Roles.user
                     )
                     db.session.add(newuser)
                     db.session.flush()

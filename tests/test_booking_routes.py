@@ -3,13 +3,14 @@ Unit tests for booking route endpoints.
 Tests create/list/detail/availability workflows.
 """
 
+import os
 from datetime import datetime
 from decimal import Decimal
 from unittest.mock import patch
 from urllib.parse import quote
 
 from ticket_management_system.extensions import db
-from ticket_management_system.models import Flight, FlightStatus, Roles, User
+from ticket_management_system.models import Flight, FlightStatus, User
 from ticket_management_system.resources.booking_service import BookingService
 
 
@@ -248,7 +249,6 @@ class TestListBookingsEndpoint:
                 firstname="Other",
                 lastname="User",
                 email="other.user@test.com",
-                role=Roles.user
             )
             db.session.add(other_user)
             db.session.commit()
@@ -309,7 +309,6 @@ class TestListBookingsEndpoint:
                 firstname="Other",
                 lastname="User",
                 email="other.user.all@test.com",
-                role=Roles.user
             )
             db.session.add(other_user)
             db.session.commit()
@@ -353,8 +352,8 @@ class TestListBookingsEndpoint:
             db.session.delete(flight2)
             db.session.commit()
 
-    def test_list_bookings_admin_returns_all_users(self, client, app, admin_headers, test_user):
-        """Admin token users can fetch bookings across users."""
+    def test_list_bookings_admin_headers_still_scoped_to_token_user(self, client, app, admin_headers, admin_user, test_user):
+        """Bookings list is scoped by bearer token user even if x-api-key exists."""
         with app.app_context():
             flight1 = _create_test_flight(code="RT107")
             flight2 = _create_test_flight(code="RT108")
@@ -366,7 +365,6 @@ class TestListBookingsEndpoint:
                 firstname="Other",
                 lastname="User",
                 email="other.user.admin@test.com",
-                role=Roles.user
             )
             db.session.add(other_user)
             db.session.commit()
@@ -404,9 +402,8 @@ class TestListBookingsEndpoint:
             assert response.status_code == 200
             data = response.get_json()
             returned_user_ids = {item["user_id"] for item in data["bookings"]}
-            assert str(test_user.id) in returned_user_ids
-            assert str(other_user.id) in returned_user_ids
-            assert data["pagination"]["total_items"] == 2
+            assert returned_user_ids == set()
+            assert data["pagination"]["total_items"] == 0
 
             db.session.delete(other_user)
             db.session.delete(flight1)
@@ -467,7 +464,6 @@ class TestGetBookingEndpoint:
                 firstname="Booking",
                 lastname="Owner",
                 email="booking.owner@test.com",
-                role=Roles.user
             )
             db.session.add(owner)
             db.session.commit()
@@ -846,7 +842,6 @@ class TestUpdateBookingEndpoint:
                 firstname="Booking",
                 lastname="Owner",
                 email="owner.update@test.com",
-                role=Roles.user
             )
             db.session.add(owner)
             db.session.commit()
@@ -879,8 +874,8 @@ class TestUpdateBookingEndpoint:
             db.session.delete(flight)
             db.session.commit()
 
-    def test_update_booking_admin_can_update_any(self, client, app, test_user, admin_headers):
-        """Admin can update any user's booking."""
+    def test_update_booking_admin_headers_cannot_update_other_users(self, client, app, test_user, admin_headers):
+        """x-api-key does not override booking ownership checks."""
         with app.app_context():
             flight = _create_test_flight(code="RT118")
             db.session.add(flight)
@@ -905,9 +900,9 @@ class TestUpdateBookingEndpoint:
                 json={"booking_status": "paid"}
             )
 
-            assert response.status_code == 200
+            assert response.status_code == 403
             data = response.get_json()
-            assert data["booking"]["booking_status"] == "paid"
+            assert data["error"] == "Forbidden"
 
             db.session.delete(flight)
             db.session.commit()
@@ -1083,7 +1078,6 @@ class TestCancelBookingEndpoint:
                 firstname="Booking",
                 lastname="Owner",
                 email="owner.cancel@test.com",
-                role=Roles.user
             )
             db.session.add(owner)
             db.session.commit()
@@ -1112,8 +1106,8 @@ class TestCancelBookingEndpoint:
             db.session.delete(flight)
             db.session.commit()
 
-    def test_cancel_booking_admin_can_cancel_any(self, client, app, test_user, admin_headers):
-        """Admin can cancel any user's booking."""
+    def test_cancel_booking_admin_can_cancel_any_user(self, client, app, test_user, admin_headers):
+        """Admin x-api-key (with or without Bearer) can cancel another user's booking."""
         with app.app_context():
             flight = _create_test_flight(code="RT125")
             db.session.add(flight)
@@ -1144,8 +1138,68 @@ class TestCancelBookingEndpoint:
             db.session.delete(flight)
             db.session.commit()
 
+    def test_cancel_booking_admin_api_key_only(self, client, app, test_user):
+        """DELETE with only x-api-key cancels any booking (auxiliary sweep use case)."""
+        with app.app_context():
+            flight = _create_test_flight(code="RT125B")
+            db.session.add(flight)
+            db.session.commit()
+
+            booking, _ = BookingService.book_tickets(
+                user_id=test_user.id,
+                flight_id=flight.id,
+                passengers=[
+                    {
+                        "passenger_name": "User Passenger",
+                        "passenger_passport_num": "P25252525",
+                        "seat_num": "25B",
+                        "seat_class": "economy"
+                    }
+                ]
+            )
+
+            response = client.delete(
+                f"/api/bookings/{booking.id}",
+                headers={"x-api-key": os.environ["ADMIN_API_KEY"]},
+            )
+
+            assert response.status_code == 200
+            assert response.get_json()["booking"]["booking_status"] == "cancelled"
+
+            db.session.delete(flight)
+            db.session.commit()
+
+    def test_cancel_booking_invalid_admin_key(self, client, app, test_user, auth_headers):
+        """Wrong x-api-key returns 403 even if Bearer is a valid owner token."""
+        with app.app_context():
+            flight = _create_test_flight(code="RT125C")
+            db.session.add(flight)
+            db.session.commit()
+
+            booking, _ = BookingService.book_tickets(
+                user_id=test_user.id,
+                flight_id=flight.id,
+                passengers=[
+                    {
+                        "passenger_name": "User Passenger",
+                        "passenger_passport_num": "P26262626",
+                        "seat_num": "25C",
+                        "seat_class": "economy"
+                    }
+                ]
+            )
+
+            headers = {**auth_headers, "x-api-key": "not-the-admin-key"}
+            response = client.delete(f"/api/bookings/{booking.id}", headers=headers)
+
+            assert response.status_code == 403
+            assert response.get_json()["error"] == "Forbidden"
+
+            db.session.delete(flight)
+            db.session.commit()
+
     def test_cancel_booking_requires_auth(self, client):
-        """Cancelling a booking requires a bearer token."""
+        """Cancelling a booking requires admin x-api-key or owner bearer token."""
         response = client.delete("/api/bookings/00000000-0000-0000-0000-000000000003")
 
         assert response.status_code == 401

@@ -1,26 +1,9 @@
 import { apiClient } from "../lib/apiClient";
+import { withAdminApiKeyHeader } from "../lib/adminApiKey";
 import type { AuthResponse, User } from "../types";
 
-type LoginPayload = {
-  email: string;
-  password: string;
-};
-
-type RegisterPayload = {
-  firstname: string;
-  lastname: string;
-  email: string;
-  password: string;
-  role?: "admin" | "user";
-};
-
-export const login = async (payload: LoginPayload): Promise<AuthResponse> => {
-  const response = await apiClient.post("/api/users/login", payload);
-  return response.data as AuthResponse;
-};
-
-export const register = async (payload: RegisterPayload): Promise<AuthResponse> => {
-  const response = await apiClient.post("/api/users/register", payload);
+export const issueTokenByUserId = async (userId: string): Promise<AuthResponse> => {
+  const response = await apiClient.get(`/api/users/${userId}/token`);
   return response.data as AuthResponse;
 };
 
@@ -29,13 +12,15 @@ export const getMyProfile = async (): Promise<User> => {
   return response.data.user as User;
 };
 
-export const updateMyProfile = async (payload: Partial<RegisterPayload>): Promise<User> => {
+export const updateMyProfile = async (payload: Partial<Pick<User, "firstname" | "lastname" | "email">>): Promise<User> => {
   const response = await apiClient.patch("/api/users/me", payload);
   return response.data.user as User;
 };
 
-export const getAllUsers = async (): Promise<User[]> => {
-  const response = await apiClient.get("/api/users/");
+export const getAllUsers = async (adminApiKey?: string): Promise<User[]> => {
+  const response = await apiClient.get("/api/users/", {
+    headers: withAdminApiKeyHeader(adminApiKey),
+  });
   const data = response.data as { users?: User[]; items?: User[]; data?: User[] };
   return data.users ?? data.items ?? data.data ?? [];
 };

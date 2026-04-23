@@ -7,7 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 from unittest.mock import patch
 from ticket_management_system.extensions import db
-from ticket_management_system.models import Flight, FlightStatus
+from ticket_management_system.models import Booking, BookingStatus, Flight, FlightStatus
 
 
 class TestAirportsEndpoint:
@@ -114,13 +114,11 @@ class TestAirportsEndpoint:
             db.session.commit()
 
     def test_get_airports_without_auth(self, client, app):
-        """Test that endpoint requires authentication."""
+        """Airports endpoint is public."""
         with app.app_context():
             response = client.get('/api/flights/airports')
 
-            assert response.status_code == 401
-            data = response.get_json()
-            assert 'error' in data
+            assert response.status_code == 200
 
 
 class TestFlightSearchEndpoint:
@@ -422,13 +420,11 @@ class TestFlightSearchEndpoint:
             assert response.content_type == 'application/json'
 
     def test_search_flights_without_auth(self, client, app):
-        """Test that endpoint requires authentication."""
+        """Search endpoint is public."""
         with app.app_context():
             response = client.get('/api/flights/search')
 
-            assert response.status_code == 401
-            data = response.get_json()
-            assert 'error' in data
+            assert response.status_code == 200
 
 
 class TestFlightSearchPagination:
@@ -608,6 +604,48 @@ class TestGetFlightByIdEndpoint:
             db.session.delete(flight)
             db.session.commit()
 
+    def test_get_flight_include_bookings_query_param(self, client, app, auth_headers, test_user):
+        """GET /api/flights/{id}?include_bookings=true embeds booking id/user/status."""
+        with app.app_context():
+            flight = Flight(
+                flight_code='BKEMBED01',
+                origin_airport='HEL',
+                destination_airport='RIX',
+                departure_time=datetime(2026, 6, 1, 10, 0),
+                arrival_time=datetime(2026, 6, 1, 11, 30),
+                base_price=Decimal('120.00'),
+                status=FlightStatus.active,
+            )
+            db.session.add(flight)
+            db.session.flush()
+            booking = Booking(
+                user_id=test_user.id,
+                flight_id=flight.id,
+                total_price=Decimal('120.00'),
+                booking_status=BookingStatus.booked,
+            )
+            db.session.add(booking)
+            db.session.commit()
+            flight_id = flight.id
+            booking_id = booking.id
+
+        response = client.get(
+            f'/api/flights/{flight_id}?include_bookings=true',
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        flight_data = response.get_json()['flight']
+        assert 'bookings' in flight_data
+        assert len(flight_data['bookings']) == 1
+        assert flight_data['bookings'][0]['id'] == str(booking_id)
+        assert flight_data['bookings'][0]['user_id'] == str(test_user.id)
+        assert flight_data['bookings'][0]['booking_status'] == 'booked'
+
+        with app.app_context():
+            db.session.delete(db.session.get(Booking, booking_id))
+            db.session.delete(db.session.get(Flight, flight_id))
+            db.session.commit()
+
     def test_get_flight_not_found(self, client, app, auth_headers):
         """Test getting a flight that doesn't exist."""
         with app.app_context():
@@ -628,18 +666,16 @@ class TestGetFlightByIdEndpoint:
             assert response.status_code == 404
 
     def test_get_flight_without_auth(self, client, app):
-        """Test that endpoint requires authentication."""
+        """Get-flight endpoint is public and returns 404 for unknown id."""
         with app.app_context():
             import uuid
             fake_id = uuid.uuid4()
             response = client.get(f'/api/flights/{fake_id}')
 
-            assert response.status_code == 401
-            data = response.get_json()
-            assert 'error' in data
+            assert response.status_code == 404
 
     def test_get_flight_with_invalid_token(self, client, app):
-        """Test getting a flight with invalid token."""
+        """Invalid bearer token is ignored for this public endpoint."""
         with app.app_context():
             import uuid
             fake_id = uuid.uuid4()
@@ -647,7 +683,7 @@ class TestGetFlightByIdEndpoint:
                 f'/api/flights/{fake_id}',
                 headers={'Authorization': 'Bearer invalid_token'}
             )
-            assert response.status_code == 401
+            assert response.status_code == 404
 
     def test_get_flight_unexpected_exception(self, client, app, auth_headers):
         """Test get_flight handles unexpected exceptions."""
@@ -875,7 +911,7 @@ class TestUpdateFlightEndpoint:
             db.session.commit()
 
     def test_update_flight_as_regular_user(self, client, app, auth_headers):
-        """Test updating a flight as regular user (should fail)."""
+        """Bearer token alone cannot update without x-api-key."""
         with app.app_context():
             test_flight = Flight(
                 flight_code='TESTUPD007',
@@ -896,10 +932,9 @@ class TestUpdateFlightEndpoint:
                 headers=auth_headers
             )
 
-            assert response.status_code == 403
+            assert response.status_code == 401
             data = response.get_json()
-            assert data['error'] == 'Forbidden'
-            assert 'Token does not permit resource: flights:write' in data['message']
+            assert data['error'] == 'Unauthorized'
 
             # Cleanup
             db.session.delete(Flight.query.filter_by(id=flight_id).first())
@@ -1291,7 +1326,7 @@ class TestDeleteFlightEndpoint:
             assert deleted_flight is None
 
     def test_delete_flight_as_regular_user(self, client, app, auth_headers):
-        """Test deleting a flight as regular user (should fail)."""
+        """Bearer token alone cannot delete without x-api-key."""
         with app.app_context():
             # Create a test flight
             test_flight = Flight(
@@ -1311,10 +1346,9 @@ class TestDeleteFlightEndpoint:
             response = client.delete(f'/api/flights/{flight_id}',
                 headers=auth_headers)
 
-            assert response.status_code == 403
+            assert response.status_code == 401
             data = response.get_json()
-            assert data['error'] == 'Forbidden'
-            assert 'Token does not permit resource: flights:write' in data['message']
+            assert data['error'] == 'Unauthorized'
 
             # Verify flight still exists
             flight_still_exists = Flight.query.filter_by(id=flight_id).first()
@@ -1340,7 +1374,7 @@ class TestDeleteFlightEndpoint:
             assert 'not found' in data['message']
 
     def test_delete_flight_without_token(self, client, app):
-        """Test deleting a flight without authentication."""
+        """Deleting without x-api-key should fail with unauthorized."""
         with app.app_context():
             import uuid
             fake_id = uuid.uuid4()
@@ -1348,7 +1382,7 @@ class TestDeleteFlightEndpoint:
 
             assert response.status_code == 401
             data = response.get_json()
-            assert data['error'] == 'Authentication required'
+            assert data['error'] == 'Unauthorized'
 
     def test_delete_flight_with_invalid_token(self, client, app):
         """Test deleting a flight with invalid token."""

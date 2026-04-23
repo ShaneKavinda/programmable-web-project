@@ -6,9 +6,10 @@ import pytest
 import os
 from datetime import datetime, timedelta, timezone
 import jwt
+os.environ.setdefault('ADMIN_API_KEY', 'test-admin-api-key')
 from ticket_management_system import create_app
 from ticket_management_system.extensions import db
-from ticket_management_system.models import User, Roles
+from ticket_management_system.models import User
 from ticket_management_system.resources.user_service import UserService
 
 
@@ -50,7 +51,6 @@ def test_user(app):
             firstname='Test',
             lastname='User',
             email='test@example.com',
-            role=Roles.user
         )
         db.session.add(user)
         db.session.commit()
@@ -69,7 +69,6 @@ def admin_user(app):
             firstname='Admin',
             lastname='User',
             email='admin@test.com',
-            role=Roles.admin
         )
         db.session.add(user)
         db.session.commit()
@@ -90,10 +89,13 @@ def auth_headers(app, test_user):
 
 @pytest.fixture(scope='function')
 def admin_headers(app, admin_user):
-    """Generate authentication headers with valid token for admin user."""
+    """Generate headers with admin API key and bearer token."""
     with app.app_context():
         token = UserService.generate_token(admin_user)
-        return {'Authorization': f'Bearer {token}'}
+        return {
+            'x-api-key': os.environ['ADMIN_API_KEY'],
+            'Authorization': f'Bearer {token}',
+        }
 
 
 @pytest.fixture(scope='function')
@@ -104,7 +106,6 @@ def expired_token(app, test_user):
         payload = {
             'user_id': str(test_user.id),
             'email': test_user.email,
-            'role': test_user.role.name,
             'permitted_resources': UserService.get_permitted_resources(test_user),
             'exp': datetime.now(timezone.utc) - timedelta(hours=1),
             'iat': datetime.now(timezone.utc) - timedelta(hours=2)
@@ -122,7 +123,6 @@ def multiple_users(app):
                 firstname=f'User{i}',
                 lastname=f'Test{i}',
                 email=f'user{i}@test.com',
-                role=Roles.user
             )
             users.append(user)
             db.session.add(user)
