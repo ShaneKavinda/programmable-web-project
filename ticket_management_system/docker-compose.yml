@@ -64,6 +64,10 @@ services:
       - TZ=Europe/Helsinki
       - FLASK_APP=ticket_management_system.app:app
       - FLASK_ENV=production
+      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-2}
+      - GUNICORN_THREADS=${GUNICORN_THREADS:-2}
+      - GUNICORN_MAX_REQUESTS=${GUNICORN_MAX_REQUESTS:-1000}
+      - GUNICORN_MAX_REQUESTS_JITTER=${GUNICORN_MAX_REQUESTS_JITTER:-100}
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       - ADMIN_API_KEY=${ADMIN_API_KEY:-}
       - NOTIFICATION_AUX_BASE_URL=http://notification-auxiliary-service:5051

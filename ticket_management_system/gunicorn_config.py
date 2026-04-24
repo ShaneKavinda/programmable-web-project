@@ -1,19 +1,23 @@
 # Gunicorn Configuration File
 # Production-ready WSGI server configuration for Flask application
 
-import multiprocessing
+import os
 
 # Server socket configuration
 bind = "0.0.0.0:5000"
 backlog = 2048
 
 # Worker processes configuration
-# Calculate optimal worker count: (2 * CPU_CORES) + 1
-workers = (multiprocessing.cpu_count() * 2) + 1
-worker_class = "sync"  # Synchronous workers suitable for I/O-bound Flask apps
-worker_connections = 1000
+# Keep defaults memory-friendly for container environments.
+# Override via env vars without rebuilding image
+workers = int(os.getenv("GUNICORN_WORKERS", "2"))
+worker_class = os.getenv("GUNICORN_WORKER_CLASS", "gthread")
+threads = int(os.getenv("GUNICORN_THREADS", "2"))
+worker_connections = int(os.getenv("GUNICORN_WORKER_CONNECTIONS", "200"))
 timeout = 30
 keepalive = 2
+max_requests = int(os.getenv("GUNICORN_MAX_REQUESTS", "1000"))
+max_requests_jitter = int(os.getenv("GUNICORN_MAX_REQUESTS_JITTER", "100"))
 
 # Process naming and user
 proc_name = "gunicorn_flask_app"
