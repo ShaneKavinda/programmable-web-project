@@ -16,7 +16,7 @@ def _auth_headers(token):
 
 def _issue_token_for_user(client, user):
     """Request a scoped token for an existing user ID."""
-    response = client.post("/api/users/token", json={"user_id": str(user.id)})
+    response = client.get(f"/api/users/{user.id}/token")
 
     assert response.status_code == 200
     return response.get_json()
@@ -78,8 +78,8 @@ def test_user_can_get_scoped_token_update_profile_and_receive_refreshed_token(cl
 
     login_response = client.post("/api/users/login", json={"email": updated_email, "password": "anything"})
     register_response = client.post("/api/users/register", json={})
-    assert login_response.status_code == 410
-    assert register_response.status_code == 410
+    assert login_response.status_code == 404
+    assert register_response.status_code == 404
 
 
 def test_admin_can_create_update_and_delete_flights_visible_to_users(client, admin_headers, test_user):

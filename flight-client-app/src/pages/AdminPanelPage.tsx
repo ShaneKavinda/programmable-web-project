@@ -25,7 +25,7 @@ import { useMemo, useState } from "react";
 import { ApiErrorSnackbar } from "../components/ApiErrorSnackbar";
 import { clearAdminApiKey, getAdminApiKey, setAdminApiKey } from "../lib/adminApiKey";
 import { formatDateTimeDdMmYyyy } from "../lib/formatDate";
-import { getAllUsers } from "../services/auth";
+import { getUsersPage } from "../services/auth";
 import { getAuxLogs } from "../services/auxLogs";
 import { createFlight, deleteFlight, searchAllFlights, searchFlightsPaginated, updateFlight } from "../services/flights";
 
@@ -49,6 +49,8 @@ export const AdminPanelPage = () => {
   const [codeFilter, setCodeFilter] = useState("");
   const [flightPage, setFlightPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [usersPage, setUsersPage] = useState(0);
+  const [usersRowsPerPage, setUsersRowsPerPage] = useState(10);
   const [sortBy, setSortBy] = useState<"departure_time" | "arrival_time" | "base_price">("departure_time");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [editPrice, setEditPrice] = useState<string>("");
@@ -101,8 +103,15 @@ export const AdminPanelPage = () => {
   });
 
   const usersQuery = useQuery({
-    queryKey: ["admin-users", activeAdminApiKey],
-    queryFn: () => getAllUsers(activeAdminApiKey ?? undefined),
+    queryKey: ["admin-users", activeAdminApiKey, usersPage, usersRowsPerPage],
+    queryFn: () =>
+      getUsersPage(
+        {
+          page: usersPage + 1,
+          per_page: usersRowsPerPage,
+        },
+        activeAdminApiKey ?? undefined,
+      ),
     enabled: Boolean(activeAdminApiKey),
   });
 
@@ -230,9 +239,42 @@ export const AdminPanelPage = () => {
               <Typography variant="h6" gutterBottom>
                 Users
               </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Total loaded users: {usersQuery.data?.length ?? 0}
-              </Typography>
+              <Table size="small" sx={{ minWidth: 900 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>User ID</TableCell>
+                    <TableCell>First Name</TableCell>
+                    <TableCell>Last Name</TableCell>
+                    <TableCell>Email</TableCell>
+                    <TableCell>Created</TableCell>
+                    <TableCell>Updated</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {(usersQuery.data?.users ?? []).map((user) => (
+                    <TableRow key={user.id}>
+                      <TableCell sx={{ fontFamily: "monospace", fontSize: "0.8rem" }}>{user.id}</TableCell>
+                      <TableCell>{user.firstname}</TableCell>
+                      <TableCell>{user.lastname}</TableCell>
+                      <TableCell>{user.email}</TableCell>
+                      <TableCell>{user.created_at ? formatDateTimeDdMmYyyy(user.created_at) : "-"}</TableCell>
+                      <TableCell>{user.updated_at ? formatDateTimeDdMmYyyy(user.updated_at) : "-"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <TablePagination
+                component="div"
+                count={usersQuery.data?.pagination.total_items ?? 0}
+                page={usersPage}
+                rowsPerPage={usersRowsPerPage}
+                onPageChange={(_event, nextPage) => setUsersPage(nextPage)}
+                onRowsPerPageChange={(event) => {
+                  setUsersRowsPerPage(Number(event.target.value));
+                  setUsersPage(0);
+                }}
+                rowsPerPageOptions={[5, 10, 20, 50]}
+              />
             </CardContent>
           </Card>
 

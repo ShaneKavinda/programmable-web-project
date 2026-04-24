@@ -254,7 +254,7 @@ def populate_database():
             print("\nToken grant examples:")
             print(f"  Admin user_id: {users[0].id}")
             print(f"  User user_id:  {users[1].id}")
-            print("  Request token: POST /api/users/token with JSON {'user_id': '<id>'}")
+            print("  Request token: GET /api/users/<user_id>/token")
             print("\nTotal records created:")
             print(f"  Users:    {User.query.count()}")
             print(f"  Flights:  {Flight.query.count()}")

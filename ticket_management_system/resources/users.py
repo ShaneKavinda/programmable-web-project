@@ -7,7 +7,7 @@ from flask import Blueprint, request, jsonify, make_response
 from marshmallow import ValidationError
 from ticket_management_system.utils import handle_validation_error, handle_general_error, handle_conflict_error
 from ticket_management_system.resources.user_service import UserService
-from ticket_management_system.static.schema.user_schemas import UserProfileUpdateSchema, UserTokenRequestSchema
+from ticket_management_system.static.schema.user_schemas import UserProfileUpdateSchema
 from ticket_management_system.exceptions import (
     TokenExpiredError,
     InvalidTokenError,
@@ -111,40 +111,6 @@ def _issue_token_for_user_id(user_id):
     response['message'] = 'Token issued successfully'
     return response
 
-@user_bp.route('/token', methods=['POST'])
-def issue_token():  # pylint: disable=too-many-return-statements
-    """Issue a scoped token for a user ID."""
-    try:
-        try:
-            json_data = request.get_json()
-        except Exception:  # pylint: disable=broad-exception-caught
-            return jsonify({
-                'error': 'Bad Request',
-                'message': 'Request body must be valid JSON'
-            }), 400
-
-        if json_data is None:
-            return jsonify({
-                'error': 'Bad Request',
-                'message': 'Request body must be JSON'
-            }), 400
-
-        schema = UserTokenRequestSchema()
-        validated_data = schema.load(json_data)
-
-        return jsonify(_issue_token_for_user_id(validated_data['user_id'])), 200
-
-    except ValidationError as err:
-        return handle_validation_error(err)
-    except UserNotFoundError as e:
-        return jsonify({
-            'error': 'Not Found',
-            'message': e.message
-        }), 404
-    except Exception as e:  # pylint: disable=broad-exception-caught
-        return handle_general_error(e, rollback=False)
-
-
 @user_bp.route('/<uuid:user_id>/token', methods=['GET'])
 def issue_token_by_user_id(user_id):
     """Issue a scoped token when the user ID is passed in the URL."""
@@ -157,26 +123,6 @@ def issue_token_by_user_id(user_id):
         }), 404
     except Exception as e:  # pylint: disable=broad-exception-caught
         return handle_general_error(e, rollback=False)
-
-
-def legacy_auth_removed():
-    """Return the standard response for removed password auth endpoints."""
-    return jsonify({
-        'error': 'Gone',
-        'message': 'Password login/register has been removed. Request a scoped token with /api/users/token.'
-    }), 410
-
-
-@user_bp.route('/register', methods=['POST'])
-def register_removed():
-    """Password registration is no longer part of authentication."""
-    return legacy_auth_removed()
-
-
-@user_bp.route('/login', methods=['POST'])
-def login_removed():
-    """Password login is no longer part of authentication."""
-    return legacy_auth_removed()
 
 
 def admin_required(f):

@@ -10,8 +10,14 @@ from unittest.mock import patch
 from urllib.parse import quote
 
 from ticket_management_system.extensions import db
+from ticket_management_system.exceptions import (
+    InvalidTokenError,
+    ResourcePermissionError,
+    TokenExpiredError,
+)
 from ticket_management_system.models import Flight, FlightStatus, User
 from ticket_management_system.resources.booking_service import BookingService
+from ticket_management_system.resources import bookings as bookings_routes
 
 
 def _create_test_flight(code="RT101", status=FlightStatus.active, base_price=Decimal("300.00")):
@@ -70,6 +76,28 @@ class TestCreateBookingEndpoint:
         assert data["error"] == "Bad Request"
         assert "errors" in data
 
+    def test_create_booking_value_error_branch(self, client):
+        """Route returns 400 when service raises ValueError post-validation."""
+        with patch("ticket_management_system.resources.bookings.BookingService.book_tickets") as mock_book:
+            mock_book.side_effect = ValueError("bad booking payload")
+            response = client.post(
+                "/api/bookings/",
+                json={
+                    "flight_id": "fe4a1338-4b98-4b51-9f5c-1234567890ab",
+                    "passengers": [
+                        {
+                            "passenger_name": "John Doe",
+                            "email": "john@example.com",
+                            "passenger_passport_num": "P12345678",
+                            "seat_num": "12A",
+                            "seat_class": "economy",
+                        }
+                    ],
+                },
+            )
+        assert response.status_code == 400
+        assert response.get_json()["error"] == "Bad Request"
+
     def test_create_booking_flight_not_found(self, client, auth_headers):
         """Return 404 when target flight does not exist."""
         response = client.post(
@@ -92,6 +120,52 @@ class TestCreateBookingEndpoint:
         assert response.status_code == 404
         data = response.get_json()
         assert data["error"] == "Not Found"
+
+    def test_create_booking_user_not_found(self, client, sample_flights):
+        """Explicit unknown user_id returns 404 from UserNotFoundError branch."""
+        response = client.post(
+            "/api/bookings/",
+            json={
+                "user_id": "00000000-0000-0000-0000-000000000000",
+                "flight_id": str(sample_flights[0].id),
+                "passengers": [
+                    {
+                        "passenger_name": "No User",
+                        "email": "nouser@test.com",
+                        "passenger_passport_num": "P77770000",
+                        "seat_num": "12A",
+                        "seat_class": "economy",
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 404
+        assert response.get_json()["error"] == "Not Found"
+
+    def test_create_booking_returns_conflict_when_flight_not_bookable(self, client, app):
+        """Cancelled flight path hits BookingConflictError response branch."""
+        with app.app_context():
+            flight = _create_test_flight(code="RT102C", status=FlightStatus.cancelled)
+            db.session.add(flight)
+            db.session.commit()
+            response = client.post(
+                "/api/bookings/",
+                json={
+                    "flight_id": str(flight.id),
+                    "passengers": [
+                        {
+                            "passenger_name": "Blocked",
+                            "email": "blocked@test.com",
+                            "passenger_passport_num": "P33330000",
+                            "seat_num": "1A",
+                            "seat_class": "economy",
+                        }
+                    ],
+                },
+            )
+            assert response.status_code == 409
+            db.session.delete(flight)
+            db.session.commit()
 
     def test_create_booking_seat_already_taken(self, client, app, auth_headers):
         """Return 409 when booking an already reserved seat."""
@@ -916,6 +990,28 @@ class TestUpdateBookingEndpoint:
 
         assert response.status_code == 401
 
+    def test_update_booking_value_error_branch(self, client, app, auth_headers, test_user):
+        """Route handles ValueError raised by BookingService.update_booking."""
+        with app.app_context():
+            flight = _create_test_flight(code="RT116B")
+            db.session.add(flight)
+            db.session.commit()
+            booking, _ = BookingService.book_tickets(
+                user_id=test_user.id,
+                flight_id=flight.id,
+                passengers=[{"passenger_name": "Test", "passenger_passport_num": "P99990000", "seat_num": "1A", "seat_class": "economy"}],
+            )
+            booking_id = booking.id
+        with patch("ticket_management_system.resources.bookings.BookingService.update_booking") as mock_update:
+            mock_update.side_effect = ValueError("bad status")
+            response = client.put(
+                f"/api/bookings/{booking_id}",
+                headers=auth_headers,
+                json={"booking_status": "paid"},
+            )
+        assert response.status_code == 400
+        assert response.get_json()["error"] == "Bad Request"
+
 
 class TestCancelBookingEndpoint:
     """Test DELETE /api/bookings/<booking_id> endpoint."""
@@ -1203,6 +1299,82 @@ class TestCancelBookingEndpoint:
         response = client.delete("/api/bookings/00000000-0000-0000-0000-000000000003")
 
         assert response.status_code == 401
+
+    def test_cancel_booking_malformed_bearer_header(self, client):
+        """Malformed Authorization header uses explicit 401 branch."""
+        response = client.delete(
+            "/api/bookings/00000000-0000-0000-0000-000000000003",
+            headers={"Authorization": "bad"},
+        )
+        assert response.status_code == 401
+        assert "Invalid authorization header format" in response.get_json()["error"]
+
+    def test_cancel_booking_non_bearer_token_type(self, client):
+        """Authorization token type other than Bearer hits explicit raise ValueError path."""
+        response = client.delete(
+            "/api/bookings/00000000-0000-0000-0000-000000000003",
+            headers={"Authorization": "Basic abc.def"},
+        )
+        assert response.status_code == 401
+
+    def test_cancel_booking_token_expired_branch(self, client, monkeypatch):
+        """TokenExpiredError branch returns 401 with token-expired payload."""
+        monkeypatch.setattr(
+            "ticket_management_system.resources.bookings.UserService.verify_token",
+            lambda *_a, **_k: (_ for _ in ()).throw(TokenExpiredError()),
+        )
+        response = client.delete(
+            "/api/bookings/00000000-0000-0000-0000-000000000003",
+            headers={"Authorization": "Bearer some.token"},
+        )
+        assert response.status_code == 401
+        assert response.get_json()["error"] == "Token expired"
+
+    def test_cancel_booking_resource_permission_branch(self, client, monkeypatch):
+        """ResourcePermissionError branch returns 403."""
+        monkeypatch.setattr(
+            "ticket_management_system.resources.bookings.UserService.verify_token",
+            lambda *_a, **_k: (_ for _ in ()).throw(ResourcePermissionError("bookings:write")),
+        )
+        response = client.delete(
+            "/api/bookings/00000000-0000-0000-0000-000000000003",
+            headers={"Authorization": "Bearer some.token"},
+        )
+        assert response.status_code == 403
+        assert response.get_json()["error"] == "Forbidden"
+
+    def test_cancel_booking_invalid_token_branch(self, client, monkeypatch):
+        """InvalidTokenError branch returns 401."""
+        monkeypatch.setattr(
+            "ticket_management_system.resources.bookings.UserService.verify_token",
+            lambda *_a, **_k: (_ for _ in ()).throw(InvalidTokenError()),
+        )
+        response = client.delete(
+            "/api/bookings/00000000-0000-0000-0000-000000000003",
+            headers={"Authorization": "Bearer some.token"},
+        )
+        assert response.status_code == 401
+        assert response.get_json()["error"] == "Invalid token"
+
+    def test_booking_helpers_cover_fallback_branches(self):
+        """Cover helper fallbacks used by multiple routes."""
+        class _Fake:
+            def __init__(self):
+                self.user = None
+                self.user_id = "abc"
+
+        fake_booking = _Fake()
+        owner_id, owner_email = bookings_routes._event_owner_info(fake_booking)  # pylint: disable=protected-access
+        assert owner_id == "abc"
+        assert owner_email == "unknown@example.com"
+
+        class _TokenUser:
+            id = "owner-id"
+
+        class _BookingNoOwner:
+            user_id = None
+
+        assert bookings_routes._can_access_booking(_TokenUser(), _BookingNoOwner()) is False  # pylint: disable=protected-access
 
     def test_cancel_booking_updates_timestamp(self, client, app, test_user, auth_headers):
         """Cancelling a booking updates the updated_at timestamp."""

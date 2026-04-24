@@ -15,7 +15,6 @@ def index():
                 "description": "RESTful API for managing flight bookings",
                 "endpoints": {
                     "tokens": {
-                        "issue": "/api/users/token",
                         "issue_by_user_id": "/api/users/{user_id}/token",
                         "get_or_update profile": "/api/users/me",
                     },

@@ -372,51 +372,6 @@ definitions:
         type: boolean
 
 paths:
-  /users/token:
-    post:
-      summary: Issue scoped token
-      description: Issue a short-lived JWT by passing an existing user ID. The token includes permitted_resources and is refreshed on successful protected API activity.
-      operationId: issueUserToken
-      tags:
-      - Authentication
-      parameters:
-      - in: body
-        name: body
-        required: true
-        schema:
-          type: object
-          required:
-          - user_id
-          properties:
-            user_id:
-              type: string
-              format: uuid
-              example: 550e8400-e29b-41d4-a716-446655440000
-      responses:
-        200:
-          description: Token issued successfully
-          schema:
-            $ref: '#/definitions/UserResponse'
-        400:
-          description: Validation error
-          schema:
-            $ref: '#/definitions/ValidationError'
-          examples:
-            application/json: &validation_error_example
-              error: Bad Request
-              message: Validation failed
-              errors:
-                field:
-                - Validation error message
-        404:
-          description: User not found
-          schema:
-            $ref: '#/definitions/NotFoundError'
-          examples:
-            application/json: &not_found_error_example
-              error: Not Found
-              message: Resource not found
-
   /users/{user_id}/token:
     get:
       summary: Issue scoped token by path user ID
@@ -440,7 +395,9 @@ paths:
           schema:
             $ref: '#/definitions/NotFoundError'
           examples:
-            application/json: *not_found_error_example
+            application/json: &not_found_error_example
+              error: Not Found
+              message: Resource not found
 
   /users/me:
     get:
@@ -506,7 +463,12 @@ paths:
           schema:
             $ref: '#/definitions/ValidationError'
           examples:
-            application/json: *validation_error_example
+            application/json: &validation_error_example
+              error: Bad Request
+              message: Validation failed
+              errors:
+                field:
+                - Validation error message
         401:
           description: Unauthorized
           schema:

@@ -3,27 +3,13 @@ Unit tests for user routes endpoints.
 Tests all HTTP endpoints in the user routes blueprint.
 """
 
+import importlib
+
 from ticket_management_system.extensions import db
 
 
 class TestTokenEndpoint:
     """Test user-ID token grant endpoints."""
-
-    def test_issue_token_success(self, client, app, test_user):
-        """A known user ID should receive a scoped token."""
-        with app.app_context():
-            response = client.post('/api/users/token', json={'user_id': str(test_user.id)})
-
-            assert response.status_code == 200
-            data = response.get_json()
-
-            assert data['message'] == 'Token issued successfully'
-            assert data['user']['id'] == str(test_user.id)
-            assert data['token_type'] == 'Bearer'
-            assert 'token' in data
-            assert 'expires_in' in data
-            assert 'permitted_resources' in data
-            assert 'users:read:self' in data['permitted_resources']
 
     def test_issue_token_by_user_id_success(self, client, app, test_user):
         """A user ID in the URL should also issue a scoped token."""
@@ -35,36 +21,49 @@ class TestTokenEndpoint:
             assert data['user']['id'] == str(test_user.id)
             assert 'token' in data
 
-    def test_issue_token_missing_user_id(self, client):
-        """Token request requires user_id."""
-        response = client.post('/api/users/token', json={})
-
-        assert response.status_code == 400
-        data = response.get_json()
-        assert data['message'] == 'Validation failed'
-        assert 'user_id' in data['errors']
-
-    def test_issue_token_unknown_user(self, client):
-        """Unknown user IDs should return 404."""
-        response = client.post('/api/users/token', json={'user_id': '00000000-0000-0000-0000-000000000000'})
-
+    def test_issue_token_by_user_id_not_found(self, client):
+        """Unknown user id in path returns Not Found."""
+        response = client.get('/api/users/00000000-0000-0000-0000-000000000000/token')
         assert response.status_code == 404
-        data = response.get_json()
-        assert data['error'] == 'Not Found'
+        assert response.get_json()['error'] == 'Not Found'
 
-    def test_register_endpoint_removed(self, client):
-        """Password registration endpoint is no longer available for auth."""
+    def test_issue_token_by_user_id_unexpected_exception(self, client, monkeypatch):
+        """Generic exception path in issue_token_by_user_id returns handled 500."""
+        monkeypatch.setattr(
+            "ticket_management_system.resources.users._issue_token_for_user_id",
+            lambda *_a, **_k: (_ for _ in ()).throw(Exception("boom")),
+        )
+        response = client.get('/api/users/00000000-0000-0000-0000-000000000000/token')
+        assert response.status_code == 500
+
+    def test_post_issue_token_endpoint_not_found(self, client):
+        """POST /api/users/token was removed; callers must use GET /api/users/{user_id}/token."""
+        response = client.post('/api/users/token', json={'user_id': '00000000-0000-0000-0000-000000000000'})
+        assert response.status_code == 404
+
+    def test_register_endpoint_not_found(self, client):
+        """Password registration endpoint does not exist."""
         response = client.post('/api/users/register', json={})
 
-        assert response.status_code == 410
-        assert response.get_json()['error'] == 'Gone'
+        assert response.status_code == 404
 
-    def test_login_endpoint_removed(self, client):
-        """Password login endpoint is no longer available for auth."""
+    def test_login_endpoint_not_found(self, client):
+        """Password login endpoint does not exist."""
         response = client.post('/api/users/login', json={})
 
-        assert response.status_code == 410
-        assert response.get_json()['error'] == 'Gone'
+        assert response.status_code == 404
+
+    def test_module_generates_admin_api_key_when_env_missing(self, monkeypatch):
+        """Reloading users module without ADMIN_API_KEY exercises fallback generation."""
+        monkeypatch.delenv("ADMIN_API_KEY", raising=False)
+        users_module = importlib.import_module("ticket_management_system.resources.users")
+        reloaded = importlib.reload(users_module)
+        try:
+            assert isinstance(reloaded.ADMIN_API_KEY, str)
+            assert len(reloaded.ADMIN_API_KEY) > 20
+        finally:
+            monkeypatch.setenv("ADMIN_API_KEY", "test-admin-api-key")
+            importlib.reload(reloaded)
 
 
 class TestGetCurrentUserEndpoint:
@@ -113,6 +112,24 @@ class TestGetCurrentUserEndpoint:
         data = response.get_json()
         assert 'Invalid authorization header format' in data['error']
 
+    def test_get_current_user_non_bearer_token_type(self, client):
+        """token_required branch: token type must be Bearer."""
+        response = client.get('/api/users/me', headers={'Authorization': 'Basic abc'})
+        assert response.status_code == 401
+        assert 'Invalid authorization header format' in response.get_json()['error']
+
+    def test_get_current_user_forbidden_by_resource_scope(self, client, monkeypatch):
+        """token_required ResourcePermissionError branch returns 403."""
+        from ticket_management_system.exceptions import ResourcePermissionError
+
+        monkeypatch.setattr(
+            "ticket_management_system.resources.users.UserService.verify_token",
+            lambda *_a, **_k: (_ for _ in ()).throw(ResourcePermissionError("users:read:self")),
+        )
+        response = client.get('/api/users/me', headers={'Authorization': 'Bearer token'})
+        assert response.status_code == 403
+        assert response.get_json()['error'] == 'Forbidden'
+
     def test_get_current_user_expired_token(self, client, app, expired_token):
         """Test getting current user with expired token."""
         with app.app_context():
@@ -122,6 +139,18 @@ class TestGetCurrentUserEndpoint:
             assert response.status_code == 401
             data = response.get_json()
             assert 'Token expired' in data['error']
+
+    def test_token_required_supports_callable_style(self, app):
+        """@token_required without args uses callable shortcut path."""
+        from ticket_management_system.resources.users import token_required
+
+        @token_required
+        def _view(_token_user):
+            return {"ok": True}, 200
+
+        with app.test_request_context("/dummy", headers={"Authorization": "Bearer bad.token"}):
+            response = _view()
+            assert response[1] == 401
 
 
 class TestGetAllUsersEndpoint:
@@ -285,6 +314,12 @@ class TestUpdateCurrentUserEndpoint:
         data = response.get_json()
         assert data['error'] == 'Bad Request'
         assert 'message' in data
+
+    def test_update_with_json_null_value(self, client, auth_headers):
+        """Explicit JSON null hits request body is JSON but None branch."""
+        response = client.patch('/api/users/me', json=None, headers=auth_headers)
+        assert response.status_code == 400
+        assert response.get_json()['error'] == 'Bad Request'
 
     def test_update_with_invalid_json(self, client, auth_headers):
         """Test update with malformed JSON returns 400."""
@@ -474,6 +509,15 @@ class TestUpdateCurrentUserEndpoint:
         data = response.get_json()
         assert data['message'] == 'Validation failed'
         assert 'password' in data['errors']
+
+    def test_update_profile_unexpected_exception(self, client, auth_headers, monkeypatch):
+        """Generic exception branch in update_token_user returns handled 500."""
+        monkeypatch.setattr(
+            "ticket_management_system.resources.users.UserService.update_user_profile",
+            lambda *_a, **_k: (_ for _ in ()).throw(Exception("unexpected")),
+        )
+        response = client.patch('/api/users/me', json={'firstname': 'New'}, headers=auth_headers)
+        assert response.status_code == 500
 
     def test_update_with_special_characters_in_name(self, client, auth_headers):
         """Test update accepts names with special characters."""
