@@ -55,3 +55,11 @@ Tune interval with `BOOKING_SWEEP_INTERVAL_SECONDS` (seconds, minimum 30). Logs 
 Naive `departure_time` values from the main API are treated as wall-clock in **`TZ`** (same as Docker / the main app). Set `TZ` if sweep and UI disagree about “past”.
 
 See `.env.example` for a full list of variables.
+
+## AI Usage Declaration (Auxiliary Service)
+
+The auxiliary service ideas, architecture, and primary implementation were created by the project team.
+
+AI assistance was used mainly for debugging support and fixing selected bugs encountered during development.
+
+All AI-assisted suggestions were manually reviewed and adapted before being applied.
