@@ -129,7 +129,8 @@ class FlightService:
             'base_price': str(flight.base_price),
             'status': flight.status.name,
             'created_at': flight.created_at.isoformat(),
-            'updated_at': flight.updated_at.isoformat()
+            'updated_at': flight.updated_at.isoformat(),
+            '_links': FlightService._flight_links(flight)
         }
         if include_bookings:
             data['bookings'] = [
@@ -137,10 +138,31 @@ class FlightService:
                     'id': str(b.id),
                     'user_id': str(b.user_id) if b.user_id else None,
                     'booking_status': b.booking_status.name,
+                    '_links': {
+                        'self': {
+                            'href': f'/api/bookings/{b.id}',
+                            'method': 'GET'
+                        }
+                    }
                 }
                 for b in flight.bookings
             ]
         return data
+
+    @staticmethod
+    def _flight_links(flight):
+        """Return hypermedia links for flight-related next actions."""
+        flight_href = f"/api/flights/{flight.id}"
+        return {
+            "self": {"href": flight_href, "method": "GET"},
+            "search": {"href": "/api/flights/search", "method": "GET"},
+            "book": {"href": "/api/bookings/", "method": "POST"},
+            "availability": {
+                "href": f"/api/bookings/availability?flight_id={flight.id}&seat_num={{seat_num}}",
+                "method": "GET",
+                "templated": True,
+            },
+        }
 
     @staticmethod
     def create_flight(  # pylint: disable=too-many-positional-arguments,too-many-arguments
