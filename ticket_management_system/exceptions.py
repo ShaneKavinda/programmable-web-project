@@ -52,6 +52,14 @@ class InvalidTokenError(Exception):
         super().__init__(self.message)
 
 
+class ResourcePermissionError(Exception):
+    """Raised when a valid token does not permit the requested resource."""
+    def __init__(self, resource):
+        self.resource = resource
+        self.message = f'Token does not permit resource: {resource}'
+        super().__init__(self.message)
+
+
 class EmailAlreadyExistsError(Exception):
     """Raised when email is already registered."""
     def __init__(self, email=None):

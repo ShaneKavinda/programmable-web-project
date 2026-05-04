@@ -1,9 +1,7 @@
 """Booking management API endpoints."""
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, make_response, request
 from marshmallow import ValidationError
 
-from ticket_management_system.models import Roles
-from ticket_management_system.resources.users import token_required
 from ticket_management_system.static.schema.booking_schemas import (
     BookTicketsSchema,
     PaginationQuerySchema,
@@ -11,26 +9,60 @@ from ticket_management_system.static.schema.booking_schemas import (
     UpdateBookingSchema
 )
 from ticket_management_system.resources.booking_service import BookingService
+from ticket_management_system.resources.notification_client import publish_booking_event
 from ticket_management_system.exceptions import (
     FlightNotFoundError,
     SeatUnavailableError,
     BookingNotFoundError,
     BookingConflictError,
+    UserNotFoundError,
+    TokenExpiredError,
+    InvalidTokenError,
+    ResourcePermissionError,
+)
+from ticket_management_system.resources.user_service import UserService
+from ticket_management_system.resources.users import (
+    ADMIN_API_KEY,
+    _attach_refreshed_token,
+    token_required,
 )
 
 booking_bp = Blueprint("bookings", __name__, url_prefix="/api/bookings")
 
 
+def _can_access_booking(token_user, booking):
+    """Return whether the token user can access the booking."""
+    if booking.user_id is None:
+        return False
+    return booking.user_id == token_user.id
+
+
+def _booking_forbidden_response():
+    """Return a standard booking ownership error response."""
+    return jsonify({
+        "error": "Forbidden",
+        "message": "You do not have permission to access this booking"
+    }), 403
+
+
+def _event_owner_info(booking):
+    """Extract user identity for notification events."""
+    owner = booking.user
+    if owner is not None:
+        return str(owner.id), owner.email
+    fallback_user_id = str(booking.user_id) if booking.user_id else "unknown"
+    return fallback_user_id, "unknown@example.com"
+
+
 @booking_bp.route("/", methods=["POST"])
-@token_required
-def create_booking(current_user):
+def create_booking():
     """Create a new booking for a flight."""
     try:
         schema = BookTicketsSchema()
         data = schema.load(request.get_json())
 
         booking, _tickets = BookingService.book_tickets(
-            user_id=current_user.id,
+            user_id=data.get("user_id"),
             flight_id=data["flight_id"],
             passengers=data["passengers"],
             booking_status=data.get("booking_status", "booked")
@@ -38,6 +70,19 @@ def create_booking(current_user):
 
         response = BookingService.format_booking_detail(booking)
         response["message"] = "Booking created successfully"
+        event_user_id, event_user_email = _event_owner_info(booking)
+        publish_booking_event(
+            event_type="booking_created",
+            booking_id=str(booking.id),
+            user_id=event_user_id,
+            user_email=event_user_email,
+            payload={
+                "flight_id": str(booking.flight_id),
+                "ticket_count": len(booking.tickets),
+                "total_price": str(booking.total_price),
+                "booking_status": booking.booking_status.name,
+            },
+        )
         return jsonify(response), 201
 
     except ValidationError as err:
@@ -47,6 +92,11 @@ def create_booking(current_user):
             "errors": err.messages
         }), 400
     except FlightNotFoundError as err:
+        return jsonify({
+            "error": "Not Found",
+            "message": err.message
+        }), 404
+    except UserNotFoundError as err:
         return jsonify({
             "error": "Not Found",
             "message": err.message
@@ -76,23 +126,19 @@ def create_booking(current_user):
 
 
 @booking_bp.route("/", methods=["GET"])
-@token_required
-def list_bookings(current_user):
-    """List bookings for current user or all bookings for admin."""
+@token_required("bookings:read")
+def list_bookings(token_user):
+    """List bookings."""
     try:
         query_schema = PaginationQuerySchema()
         query_data = query_schema.load(request.args)
 
-        include_all = request.args.get("all", "false").lower() == "true"
-        user_filter = None if (current_user.role == Roles.admin and include_all) else current_user.id
-
         result = BookingService.get_paginated_bookings(
-            user_id=user_filter,
+            user_id=token_user.id,
             page=query_data.get("page", 1),
             per_page=query_data.get("per_page", 10)
         )
         return jsonify(result), 200
-
     except ValidationError as err:
         return jsonify({
             "error": "Bad Request",
@@ -107,27 +153,19 @@ def list_bookings(current_user):
 
 
 @booking_bp.route("/<uuid:booking_id>", methods=["PUT"])
-@token_required
-def update_booking(current_user, booking_id):
+@token_required("bookings:write")
+def update_booking(token_user, booking_id):
     """Update booking status."""
     try:
-        # Get the booking first
         booking = BookingService.get_booking_by_id(booking_id)
         if not booking:
             raise BookingNotFoundError(booking_id)
+        if not _can_access_booking(token_user, booking):
+            return _booking_forbidden_response()
 
-        # Check permissions - only owner or admin can update
-        if current_user.role != Roles.admin and booking.user_id != current_user.id:
-            return jsonify({
-                "error": "Forbidden",
-                "message": "You are not allowed to update this booking"
-            }), 403
-
-        # Validate request body
         schema = UpdateBookingSchema()
         data = schema.load(request.get_json())
 
-        # Update booking
         updated_booking = BookingService.update_booking(
             booking_id=booking_id,
             booking_status=data["booking_status"]
@@ -168,28 +206,90 @@ def update_booking(current_user, booking_id):
 
 
 @booking_bp.route("/<uuid:booking_id>", methods=["DELETE"])
-@token_required
-def cancel_booking(current_user, booking_id):
-    """Cancel a booking."""
+def cancel_booking(booking_id):
+    """Cancel a booking.
+
+    Owners send ``Authorization: Bearer`` with ``bookings:write`` scope.
+    Admins send ``x-api-key`` matching ``ADMIN_API_KEY`` to cancel any user's booking.
+    """
+    api_key = request.headers.get("x-api-key", "").strip()
+    admin_cancel = False
+    token_user = None
+
+    if api_key:
+        if api_key != ADMIN_API_KEY:
+            return jsonify({
+                "error": "Forbidden",
+                "message": "Invalid API key",
+            }), 403
+        admin_cancel = True
+    else:
+        token = None
+        if "Authorization" in request.headers:
+            auth_header = request.headers["Authorization"]
+            try:
+                token_type, token = auth_header.split(" ", 1)
+                if token_type.lower() != "bearer":
+                    raise ValueError
+            except ValueError:
+                return jsonify({
+                    "error": "Invalid authorization header format",
+                    "message": "Use format: Bearer <token>",
+                }), 401
+        if not token:
+            return jsonify({
+                "error": "Authentication required",
+                "message": "Provide x-api-key (admin) or Bearer token (owner)",
+            }), 401
+        try:
+            token_user = UserService.verify_token(
+                token,
+                required_resource="bookings:write",
+            )
+        except TokenExpiredError as err:
+            return jsonify({
+                "error": "Token expired",
+                "message": err.message,
+            }), 401
+        except ResourcePermissionError as err:
+            return jsonify({
+                "error": "Forbidden",
+                "message": err.message,
+            }), 403
+        except (InvalidTokenError, UserNotFoundError) as err:
+            return jsonify({
+                "error": "Invalid token",
+                "message": err.message,
+            }), 401
+
     try:
-        # Get the booking first
         booking = BookingService.get_booking_by_id(booking_id)
         if not booking:
             raise BookingNotFoundError(booking_id)
+        if not admin_cancel and not _can_access_booking(token_user, booking):
+            return _booking_forbidden_response()
 
-        # Check permissions - only owner or admin can cancel
-        if current_user.role != Roles.admin and booking.user_id != current_user.id:
-            return jsonify({
-                "error": "Forbidden",
-                "message": "You are not allowed to cancel this booking"
-            }), 403
-
-        # Cancel booking
         cancelled_booking = BookingService.cancel_booking(booking_id)
 
         response = BookingService.format_booking_detail(cancelled_booking)
         response["message"] = "Booking cancelled successfully"
-        return jsonify(response), 200
+        event_user_id, event_user_email = _event_owner_info(cancelled_booking)
+        publish_booking_event(
+            event_type="booking_cancelled",
+            booking_id=str(cancelled_booking.id),
+            user_id=event_user_id,
+            user_email=event_user_email,
+            payload={
+                "flight_id": str(cancelled_booking.flight_id),
+                "total_price": str(cancelled_booking.total_price),
+                "booking_status": cancelled_booking.booking_status.name,
+            },
+        )
+        body = jsonify(response)
+        if admin_cancel:
+            return body, 200
+        resp = make_response(body, 200)
+        return _attach_refreshed_token(resp, token_user)
 
     except BookingNotFoundError as err:
         return jsonify({
@@ -211,19 +311,15 @@ def cancel_booking(current_user, booking_id):
 
 
 @booking_bp.route("/<uuid:booking_id>", methods=["GET"])
-@token_required
-def get_booking(current_user, booking_id):
+@token_required("bookings:read")
+def get_booking(token_user, booking_id):
     """Get booking details by ID."""
     try:
         booking = BookingService.get_booking_by_id(booking_id)
         if not booking:
             raise BookingNotFoundError(booking_id)
-
-        if current_user.role != Roles.admin and booking.user_id != current_user.id:
-            return jsonify({
-                "error": "Forbidden",
-                "message": "You are not allowed to access this booking"
-            }), 403
+        if not _can_access_booking(token_user, booking):
+            return _booking_forbidden_response()
 
         return jsonify(BookingService.format_booking_detail(booking)), 200
 
@@ -240,8 +336,7 @@ def get_booking(current_user, booking_id):
 
 
 @booking_bp.route("/availability", methods=["GET"])
-@token_required
-def get_seat_availability(_current_user):
+def get_seat_availability():
     """Check seat availability."""
     try:
         schema = SeatAvailabilityQuerySchema()

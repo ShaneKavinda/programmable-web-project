@@ -30,7 +30,7 @@ def create_app():
         "title": "Flight Management System API",
         "uiversion": 3,
         "version": "1.0.0",
-        "description": "RESTful API for managing flight bookings with JWT authentication",
+        "description": "RESTful API for managing flight bookings with scoped user-ID tokens",
         "termsOfService": "",
         "specs_route": "/apidocs/",
         "securityDefinitions": {

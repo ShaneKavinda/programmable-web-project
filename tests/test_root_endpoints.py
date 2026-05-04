@@ -31,7 +31,7 @@ class TestRootIndexEndpoint:
         data = response.get_json()
         assert 'endpoints' in data
         endpoints = data['endpoints']
-        assert 'authentication' in endpoints
+        assert 'tokens' in endpoints
         assert 'users' in endpoints
         assert 'flights' in endpoints
         assert 'bookings' in endpoints

@@ -10,13 +10,11 @@ from ticket_management_system.models import (
     BookingStatus,
     Flight,
     FlightStatus,
-    Roles,
     SeatClass,
     Ticket,
     User,
 )
 from datetime import datetime, timedelta
-from werkzeug.security import generate_password_hash
 from decimal import Decimal
 import random
 
@@ -38,43 +36,31 @@ def create_users():
             firstname="Admin",
             lastname="User",
             email="admin@flightsystem.com",
-            password_hash=generate_password_hash("admin123"),
-            role=Roles.admin
         ),
         User(
             firstname="John",
             lastname="Doe",
             email="john.doe@example.com",
-            password_hash=generate_password_hash("password123"),
-            role=Roles.user
         ),
         User(
             firstname="Jane",
             lastname="Smith",
             email="jane.smith@example.com",
-            password_hash=generate_password_hash("password123"),
-            role=Roles.user
         ),
         User(
             firstname="Mike",
             lastname="Johnson",
             email="mike.johnson@example.com",
-            password_hash=generate_password_hash("password123"),
-            role=Roles.user
         ),
         User(
             firstname="Sarah",
             lastname="Williams",
             email="sarah.williams@example.com",
-            password_hash=generate_password_hash("password123"),
-            role=Roles.user
         ),
         User(
             firstname="David",
             lastname="Brown",
             email="david.brown@example.com",
-            password_hash=generate_password_hash("password123"),
-            role=Roles.user
         )
     ]
 
@@ -226,7 +212,8 @@ def create_bookings_and_tickets(users, flights):
 
                 ticket = Ticket(
                     booking_id=booking.id,
-                    passenger_name=f"{passenger_firstname} {passenger_lastname}",
+                    passenger_fname=passenger_firstname,
+                    passenger_lname=passenger_lastname,
                     passenger_passport_num=passport_num,
                     seat_num=seat_num,
                     flight_id=flight.id,
@@ -264,9 +251,10 @@ def populate_database():
             print("\n" + "=" * 60)
             print("✓ DATABASE POPULATED SUCCESSFULLY!")
             print("=" * 60)
-            print("\nTest credentials:")
-            print("  Admin: admin@flightsystem.com / admin123")
-            print("  User:  john.doe@example.com / password123")
+            print("\nToken grant examples:")
+            print(f"  Admin user_id: {users[0].id}")
+            print(f"  User user_id:  {users[1].id}")
+            print("  Request token: GET /api/users/<user_id>/token")
             print("\nTotal records created:")
             print(f"  Users:    {User.query.count()}")
             print(f"  Flights:  {Flight.query.count()}")

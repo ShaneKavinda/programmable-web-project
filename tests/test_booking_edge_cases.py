@@ -3,10 +3,9 @@ from datetime import datetime
 from decimal import Decimal
 
 import pytest
-from werkzeug.security import generate_password_hash
 
 from ticket_management_system.extensions import db
-from ticket_management_system.models import Flight, FlightStatus, User, Roles
+from ticket_management_system.models import Flight, FlightStatus, User
 from ticket_management_system.resources.booking_service import BookingService
 
 
@@ -38,8 +37,6 @@ class TestBookingServiceEdgeCases:
                 firstname='Booking',
                 lastname='User',
                 email='booking@test.com',
-                password_hash=generate_password_hash('password123'),
-                role=Roles.user
             )
             db.session.add(user)
             db.session.commit()

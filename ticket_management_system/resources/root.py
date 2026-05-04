@@ -14,9 +14,8 @@ def index():
                 "version": "1.0.0",
                 "description": "RESTful API for managing flight bookings",
                 "endpoints": {
-                    "authentication": {
-                        "register": "/api/users/register",
-                        "login": "/api/users/login",
+                    "tokens": {
+                        "issue_by_user_id": "/api/users/{user_id}/token",
                         "get_or_update profile": "/api/users/me",
                     },
                     "users": "/api/users/",

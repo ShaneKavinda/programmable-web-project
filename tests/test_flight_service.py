@@ -252,6 +252,42 @@ class TestFlightServiceSearch:
         assert 'flights' in result
         assert isinstance(result['flights'], list)
 
+    def test_search_flights_invalid_arrival_date_format(self, app, sample_flights):
+        """Invalid arrival_date is ignored (except branch coverage)."""
+        result = FlightService.search_flights(arrival_date='not-a-date')
+        assert 'flights' in result
+        assert isinstance(result['flights'], list)
+
+    def test_search_flights_status_filter_non_all(self, app):
+        """status='inactive' follows non-all status branch."""
+        with app.app_context():
+            inactive = Flight(
+                flight_code='AA199',
+                origin_airport='HEL',
+                destination_airport='ARN',
+                departure_time=datetime(2026, 7, 1, 9, 0),
+                arrival_time=datetime(2026, 7, 1, 10, 0),
+                base_price=Decimal('99.99'),
+                status=FlightStatus.inactive,
+            )
+            active = Flight(
+                flight_code='AA198',
+                origin_airport='HEL',
+                destination_airport='ARN',
+                departure_time=datetime(2026, 7, 1, 11, 0),
+                arrival_time=datetime(2026, 7, 1, 12, 0),
+                base_price=Decimal('109.99'),
+                status=FlightStatus.active,
+            )
+            db.session.add(inactive)
+            db.session.add(active)
+            db.session.commit()
+            result = FlightService.search_flights(status="inactive")
+            assert all(f["status"] == "inactive" for f in result["flights"])
+            db.session.delete(inactive)
+            db.session.delete(active)
+            db.session.commit()
+
     def test_search_flights_case_insensitive(self, app):
         """Test that airport search is case-insensitive."""
         with app.app_context():
@@ -515,6 +551,27 @@ class TestFlightServiceHelpers:
             assert 'updated_at' in result
 
             # Cleanup
+            db.session.delete(flight)
+            db.session.commit()
+
+    def test_update_flight_status_string_and_enum_paths(self, app):
+        """update_flight supports status as str and FlightStatus enum."""
+        with app.app_context():
+            flight = Flight(
+                flight_code='AA177',
+                origin_airport='HEL',
+                destination_airport='RIX',
+                departure_time=datetime(2026, 8, 1, 10, 0),
+                arrival_time=datetime(2026, 8, 1, 11, 0),
+                base_price=Decimal('111.00'),
+                status=FlightStatus.active,
+            )
+            db.session.add(flight)
+            db.session.commit()
+            updated = FlightService.update_flight(flight.id, status="delayed")
+            assert updated.status == FlightStatus.delayed
+            updated = FlightService.update_flight(flight.id, status=FlightStatus.landed)
+            assert updated.status == FlightStatus.landed
             db.session.delete(flight)
             db.session.commit()
 

@@ -1,67 +1,60 @@
 """Validation schemas for user endpoints."""
+
 from marshmallow import Schema, fields, validates, ValidationError, validate
 
 
 class UserProfileUpdateSchema(Schema):
     """Schema for user profile update validation."""
+
     firstname = fields.Str(
         required=False,
         allow_none=False,
-        validate=[
-            validate.Length(min=1, max=30, error='firstname must be between 1 and 30 characters'),
-        ]
+        validate=validate.Length(
+            min=1,
+            max=30,
+            error="firstname must be between 1 and 30 characters"
+        )
     )
+
     lastname = fields.Str(
         required=False,
         allow_none=False,
-        validate=[
-            validate.Length(min=1, max=30, error='lastname must be between 1 and 30 characters'),
-        ]
+        validate=validate.Length(
+            min=1,
+            max=30,
+            error="lastname must be between 1 and 30 characters"
+        )
     )
+
     email = fields.Email(
         required=False,
         allow_none=False,
-        validate=validate.Length(max=255, error='email must be 255 characters or less')
-    )
-    password = fields.Str(
-        required=False,
-        allow_none=False,
-        validate=validate.Length(min=6, error='password must be at least 6 characters')
+        validate=validate.Length(
+            max=255,
+            error="email must be 255 characters or less"
+        )
     )
 
-    @validates('firstname')
+    @validates("firstname")
     def validate_firstname_not_empty(self, value, **_kwargs):
-        """Validate firstname is not empty."""
-        if value and not value.strip():
-            raise ValidationError('firstname cannot be empty or only whitespace')
+        """Validate firstname is not empty or whitespace only."""
+        if not value.strip():
+            raise ValidationError("firstname cannot be empty or only whitespace")
 
-    @validates('lastname')
+    @validates("lastname")
     def validate_lastname_not_empty(self, value, **_kwargs):
-        """Validate lastname is not empty."""
-        if value and not value.strip():
-            raise ValidationError('lastname cannot be empty or only whitespace')
+        """Validate lastname is not empty or whitespace only."""
+        if not value.strip():
+            raise ValidationError("lastname cannot be empty or only whitespace")
 
 
-class UserRegistrationSchema(Schema):
-    """Schema for user registration validation."""
-    firstname = fields.Str(
+class UserTokenRequestSchema(Schema):
+    """Schema for requesting a scoped token by user_id."""
+
+    user_id = fields.UUID(
         required=True,
-        validate=validate.Length(min=1, max=30, error='firstname must be between 1 and 30 characters')
-    )
-    lastname = fields.Str(
-        required=True,
-        validate=validate.Length(min=1, max=30, error='lastname must be between 1 and 30 characters')
-    )
-    email = fields.Email(
-        required=True,
-        validate=validate.Length(max=255, error='email must be 255 characters or less')
-    )
-    password = fields.Str(
-        required=True,
-        validate=validate.Length(min=6, error='password must be at least 6 characters')
-    )
-    role = fields.Str(
-        required=False,
-        allow_none=True,
-        validate=validate.OneOf(['admin', 'user'], error='role must be either "admin" or "user"')
+        error_messages={
+            "required": "user_id is required",
+            "invalid_uuid": "user_id must be a valid UUID"
+        }
     )

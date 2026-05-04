@@ -2,7 +2,7 @@
 
 Web client for the Flight Management System API, implemented with React + Vite + TypeScript + MUI.
 
-This client supports end-to-end passenger workflows: account creation/login, flight search, multi-passenger booking, booking detail/ticket inspection, cancellation, payment, and profile updates.
+This client supports end-to-end passenger workflows: account access via user-id token issuance, flight search, multi-passenger booking, booking detail/ticket inspection, cancellation, payment, and profile updates.
 
 ## Stack
 
@@ -18,18 +18,23 @@ This client supports end-to-end passenger workflows: account creation/login, fli
 
 | Resource | Method | Used for |
 | --- | --- | --- |
-| `/api/users/register` | `POST` | User registration |
-| `/api/users/login` | `POST` | User login and token retrieval |
+| `/api/users/{user_id}/token` | `GET` | Issue scoped token for client session |
 | `/api/users/me` | `GET` | Load profile data |
 | `/api/users/me` | `PATCH` | Update profile data |
+| `/api/users/` | `GET` | Admin user list (with `x-api-key`) |
 | `/api/flights/airports` | `GET` | Origin/destination dropdowns |
 | `/api/flights/search` | `GET` | Filtered flight search |
+| `/api/flights/{id}` | `GET` | Flight details |
+| `/api/flights/` | `POST` | Admin flight creation (with `x-api-key`) |
+| `/api/flights/{id}` | `PUT` | Admin flight update (with `x-api-key`) |
+| `/api/flights/{id}` | `DELETE` | Admin flight deletion (with `x-api-key`) |
 | `/api/bookings/availability` | `GET` | Seat availability checks in booking wizard |
 | `/api/bookings/` | `POST` | Create booking with one or more passengers |
 | `/api/bookings/` | `GET` | Booking list |
 | `/api/bookings/{id}` | `GET` | Booking details with ticket rows |
 | `/api/bookings/{id}` | `DELETE` | Booking cancellation |
 | `/api/payments/` | `POST` | Booking payment |
+| `/api/aux/notifications` | `GET` | Admin auxiliary notification logs (with `x-api-key`) |
 
 ## Prerequisites
 
@@ -67,10 +72,20 @@ npm run build
 npm run preview
 ```
 
+## Testing
+
+There is currently no dedicated automated unit/integration test suite inside `flight-client-app`.
+
+Client functionality is verified through:
+- manual end-to-end testing against the running backend API
+- project-level API/functional tests in the root `tests/` directory
+
+If a client test script is added later, it should be documented here with exact run commands.
+
 ## Main Features
 
 1. **Authentication**
-   - Register and login pages with form validation
+   - Account access page with user-id token issuance flow and validation
    - JWT persisted in local storage and applied to API requests
    - Protected routes for authenticated pages
 
@@ -112,3 +127,18 @@ The implementation uses official documentation and APIs from:
 - Axios docs: [https://axios-http.com/docs/intro](https://axios-http.com/docs/intro)
 
 No external template code was copied directly. The implementation follows official documentation and standard usage patterns from the libraries listed above.
+
+## AI Usage Declaration
+
+This client deliverable was developed with extensive AI assistance.
+
+AI-generated or AI-assisted parts include most of the client implementation, including:
+- project scaffolding and route/page structure
+- API service modules and request wiring
+- auth/session context handling
+- booking wizard flow, seat-selection helper logic, and form validation patterns
+- admin panel structure and data-table interactions
+- error handling patterns and UI feedback components
+- iterative refactoring and bug-fix patches during development
+
+All generated outputs were reviewed, edited, and integrated manually before final use.

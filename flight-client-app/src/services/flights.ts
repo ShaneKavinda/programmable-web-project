@@ -1,4 +1,5 @@
 import { apiClient } from "../lib/apiClient";
+import { withAdminApiKeyHeader } from "../lib/adminApiKey";
 import type { Flight, PaginatedResponse } from "../types";
 
 export type FlightSearchFilters = {
@@ -84,21 +85,34 @@ type AdminFlightPayload = {
   status?: "active" | "inactive" | "started" | "en_route" | "landed" | "cancelled" | "delayed";
 };
 
-export const createFlight = async (payload: AdminFlightPayload): Promise<Flight> => {
-  const response = await apiClient.post("/api/flights/", payload);
+export const createFlight = async (
+  payload: AdminFlightPayload,
+  adminApiKey?: string,
+): Promise<Flight> => {
+  const response = await apiClient.post("/api/flights/", payload, {
+    headers: withAdminApiKeyHeader(adminApiKey),
+  });
   return (response.data as { flight?: Flight }).flight as Flight;
 };
 
 export const updateFlight = async (
   flightId: string,
   payload: Partial<AdminFlightPayload>,
+  adminApiKey?: string,
 ): Promise<Flight> => {
-  const response = await apiClient.put(`/api/flights/${flightId}`, payload);
+  const response = await apiClient.put(`/api/flights/${flightId}`, payload, {
+    headers: withAdminApiKeyHeader(adminApiKey),
+  });
   return (response.data as { flight?: Flight }).flight as Flight;
 };
 
-export const deleteFlight = async (flightId: string): Promise<void> => {
-  await apiClient.delete(`/api/flights/${flightId}`);
+export const deleteFlight = async (
+  flightId: string,
+  adminApiKey?: string,
+): Promise<void> => {
+  await apiClient.delete(`/api/flights/${flightId}`, {
+    headers: withAdminApiKeyHeader(adminApiKey),
+  });
 };
 
 export async function getFlightById(flightId: string): Promise<Flight | null> {

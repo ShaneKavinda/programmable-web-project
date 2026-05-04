@@ -13,11 +13,11 @@ from ticket_management_system.exceptions import (
     BookingConflictError,
     FlightNotFoundError,
     SeatUnavailableError,
+    UserNotFoundError,
 )
 from ticket_management_system.extensions import db
-from ticket_management_system.models import BookingStatus, Flight, FlightStatus, Roles, SeatClass, User
+from ticket_management_system.models import BookingStatus, Flight, FlightStatus, SeatClass, User
 from ticket_management_system.resources.booking_service import BookingService
-from werkzeug.security import generate_password_hash
 
 
 @pytest.fixture
@@ -28,8 +28,6 @@ def booking_user(app):
             firstname="Booking",
             lastname="Tester",
             email="booking.service@test.com",
-            password_hash=generate_password_hash("password123"),
-            role=Roles.user
         )
         db.session.add(user)
         db.session.commit()
@@ -127,6 +125,30 @@ class TestBookingServiceBookTickets:
             db.session.delete(flight)
             db.session.commit()
 
+    def test_book_tickets_requires_email_when_no_user_id(self, app):
+        """Anonymous service bookings require first passenger email for ownership."""
+        with app.app_context():
+            flight = _create_flight(code="BK113")
+            db.session.add(flight)
+            db.session.commit()
+
+            with pytest.raises(ValueError, match="First passenger email is required"):
+                BookingService.book_tickets(
+                    user_id=None,
+                    flight_id=flight.id,
+                    passengers=[
+                        {
+                            "passenger_name": "No Email",
+                            "passenger_passport_num": "N12345678",
+                            "seat_num": "2A",
+                            "seat_class": "economy"
+                        }
+                    ]
+                )
+
+            db.session.delete(flight)
+            db.session.commit()
+
     def test_book_tickets_flight_not_found(self, app, booking_user):
         """Raise FlightNotFoundError for non-existent flight."""
         with app.app_context():
@@ -195,6 +217,43 @@ class TestBookingServiceBookTickets:
                     ]
                 )
 
+            db.session.delete(flight)
+            db.session.commit()
+
+    def test_book_tickets_rejects_empty_passenger_list(self, app, booking_user):
+        """book_tickets requires non-empty passenger list."""
+        with app.app_context():
+            flight = _create_flight(code="BK114A")
+            db.session.add(flight)
+            db.session.commit()
+            with pytest.raises(ValueError, match="non-empty list"):
+                BookingService.book_tickets(
+                    user_id=booking_user.id,
+                    flight_id=flight.id,
+                    passengers=[],
+                )
+            db.session.delete(flight)
+            db.session.commit()
+
+    def test_book_tickets_rejects_unknown_user(self, app):
+        """book_tickets raises UserNotFoundError for unknown user_id."""
+        with app.app_context():
+            flight = _create_flight(code="BK114B")
+            db.session.add(flight)
+            db.session.commit()
+            with pytest.raises(UserNotFoundError):
+                BookingService.book_tickets(
+                    user_id=uuid.uuid4(),
+                    flight_id=flight.id,
+                    passengers=[
+                        {
+                            "passenger_name": "Known Passenger",
+                            "passenger_passport_num": "P11223344",
+                            "seat_num": "10A",
+                            "seat_class": "economy",
+                        }
+                    ],
+                )
             db.session.delete(flight)
             db.session.commit()
 
@@ -283,6 +342,59 @@ class TestBookingServiceHelpers:
             db.session.delete(flight1)
             db.session.delete(flight2)
             db.session.commit()
+
+    def test_build_ticket_requires_split_name_fields_when_split_mode_used(self, app):
+        """_build_ticket enforces passenger_fname/passenger_lname when split fields are present."""
+        with app.app_context():
+            flight = _create_flight(code="BK117A")
+            db.session.add(flight)
+            db.session.commit()
+            with pytest.raises(ValueError, match="passenger_fname, passenger_lname"):
+                BookingService._build_ticket(  # pylint: disable=protected-access
+                    booking_id=uuid.uuid4(),
+                    flight=flight,
+                    passenger={
+                        "passenger_fname": "  ",
+                        "passenger_lname": None,
+                        "passenger_passport_num": "P00000001",
+                        "seat_num": "1A",
+                        "seat_class": "economy",
+                    },
+                    requested_seats=set(),
+                )
+            db.session.delete(flight)
+            db.session.commit()
+
+    def test_get_passenger_names_split_trim_and_legacy_fallbacks(self):
+        """_get_passenger_names covers split-name trim and legacy edge cases."""
+        first, last = BookingService._get_passenger_names(  # pylint: disable=protected-access
+            {"passenger_fname": "  Jane  ", "passenger_lname": "  Doe "}
+        )
+        assert first == "Jane"
+        assert last == "Doe"
+
+        first2, last2 = BookingService._get_passenger_names(  # pylint: disable=protected-access
+            {"passenger_name": 123}
+        )
+        assert first2 is None and last2 is None
+
+        first3, last3 = BookingService._get_passenger_names(  # pylint: disable=protected-access
+            {"passenger_name": "   "}
+        )
+        assert first3 == ""
+        assert last3 == ""
+
+    def test_parse_seat_class_enum_and_invalid(self):
+        """_parse_seat_class accepts enum object and rejects invalid string."""
+        parsed = BookingService._parse_seat_class(SeatClass.business)  # pylint: disable=protected-access
+        assert parsed == SeatClass.business
+        with pytest.raises(ValueError, match="Invalid seat_class"):
+            BookingService._parse_seat_class("vip")  # pylint: disable=protected-access
+
+    def test_normalize_seat_number_rejects_empty(self):
+        """_normalize_seat_number rejects blank input."""
+        with pytest.raises(ValueError, match="non-empty string"):
+            BookingService._normalize_seat_number("   ")  # pylint: disable=protected-access
 
 
 class TestBookingServiceUpdateBooking:

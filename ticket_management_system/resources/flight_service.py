@@ -1,5 +1,8 @@
 """Business logic for flight operations."""
 from datetime import datetime, timedelta
+
+from sqlalchemy.orm import selectinload
+
 from ticket_management_system.extensions import db
 from ticket_management_system.models import Flight, FlightStatus
 from ticket_management_system.exceptions import FlightAlreadyExistsError
@@ -106,14 +109,17 @@ class FlightService:
         return format_pagination_response('flights', flights_data, pagination)
 
     @staticmethod
-    def get_flight_by_id(flight_id):
-        """Get flight by ID."""
-        return Flight.query.filter_by(id=flight_id).first()
+    def get_flight_by_id(flight_id, load_bookings=False):
+        """Get flight by ID. Optionally eager-load bookings for list payloads."""
+        query = Flight.query.filter_by(id=flight_id)
+        if load_bookings:
+            query = query.options(selectinload(Flight.bookings))
+        return query.first()
 
     @staticmethod
-    def format_flight_detail(flight):
+    def format_flight_detail(flight, include_bookings=False):
         """Format flight details for response."""
-        return {
+        data = {
             'id': str(flight.id),
             'flight_code': flight.flight_code,
             'origin_airport': flight.origin_airport,
@@ -123,7 +129,39 @@ class FlightService:
             'base_price': str(flight.base_price),
             'status': flight.status.name,
             'created_at': flight.created_at.isoformat(),
-            'updated_at': flight.updated_at.isoformat()
+            'updated_at': flight.updated_at.isoformat(),
+            '_links': FlightService._flight_links(flight)
+        }
+        if include_bookings:
+            data['bookings'] = [
+                {
+                    'id': str(b.id),
+                    'user_id': str(b.user_id) if b.user_id else None,
+                    'booking_status': b.booking_status.name,
+                    '_links': {
+                        'self': {
+                            'href': f'/api/bookings/{b.id}',
+                            'method': 'GET'
+                        }
+                    }
+                }
+                for b in flight.bookings
+            ]
+        return data
+
+    @staticmethod
+    def _flight_links(flight):
+        """Return hypermedia links for flight-related next actions."""
+        flight_href = f"/api/flights/{flight.id}"
+        return {
+            "self": {"href": flight_href, "method": "GET"},
+            "search": {"href": "/api/flights/search", "method": "GET"},
+            "book": {"href": "/api/bookings/", "method": "POST"},
+            "availability": {
+                "href": f"/api/bookings/availability?flight_id={flight.id}&seat_num={{seat_num}}",
+                "method": "GET",
+                "templated": True,
+            },
         }
 
     @staticmethod

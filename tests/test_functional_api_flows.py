@@ -14,19 +14,12 @@ def _auth_headers(token):
     return {"Authorization": f"Bearer {token}"}
 
 
-def _register_user(client, *, password="password123"):
-    """Register a user through the public API and return payload plus response JSON."""
-    unique = uuid.uuid4().hex[:8]
-    payload = {
-        "firstname": "Flow",
-        "lastname": f"User{unique[:4]}",
-        "email": f"flow_{unique}@example.com",
-        "password": password,
-    }
-    response = client.post("/api/users/register", json=payload)
+def _issue_token_for_user(client, user):
+    """Request a scoped token for an existing user ID."""
+    response = client.get(f"/api/users/{user.id}/token")
 
-    assert response.status_code == 201
-    return payload, response.get_json()
+    assert response.status_code == 200
+    return response.get_json()
 
 
 def _build_flight_payload(
@@ -49,69 +42,49 @@ def _build_flight_payload(
     }
 
 
-def test_user_can_register_update_profile_and_log_in_with_new_credentials(client):
-    """A user should be able to complete the main auth/profile lifecycle over HTTP."""
-    original_password = "password123"
-    registration_payload, registration_data = _register_user(client, password=original_password)
+def test_user_can_get_scoped_token_update_profile_and_receive_refreshed_token(client, test_user):
+    """A user ID should grant a scoped token that refreshes after activity."""
+    token_data = _issue_token_for_user(client, test_user)
+    user_headers = _auth_headers(token_data["token"])
 
-    registration_headers = _auth_headers(registration_data["token"])
-
-    me_response = client.get("/api/users/me", headers=registration_headers)
+    me_response = client.get("/api/users/me", headers=user_headers)
     assert me_response.status_code == 200
+    assert "X-Refreshed-Token" in me_response.headers
     me_data = me_response.get_json()
-    assert me_data["user"]["email"] == registration_payload["email"]
+    assert me_data["user"]["email"] == test_user.email
 
     updated_email = f"updated_{uuid.uuid4().hex[:8]}@example.com"
-    updated_password = "newPassword123"
     update_response = client.patch(
         "/api/users/me",
-        headers=registration_headers,
+        headers=_auth_headers(me_response.headers["X-Refreshed-Token"]),
         json={
             "firstname": "Updated",
             "lastname": "Traveller",
             "email": updated_email,
-            "password": updated_password,
         },
     )
 
     assert update_response.status_code == 200
+    assert "X-Refreshed-Token" in update_response.headers
     update_data = update_response.get_json()
     assert update_data["user"]["firstname"] == "Updated"
     assert update_data["user"]["lastname"] == "Traveller"
     assert update_data["user"]["email"] == updated_email
 
-    updated_me_response = client.get("/api/users/me", headers=registration_headers)
+    updated_me_response = client.get("/api/users/me", headers=_auth_headers(update_response.headers["X-Refreshed-Token"]))
     assert updated_me_response.status_code == 200
     updated_me_data = updated_me_response.get_json()
     assert updated_me_data["user"]["email"] == updated_email
 
-    old_login_response = client.post(
-        "/api/users/login",
-        json={
-            "email": registration_payload["email"],
-            "password": original_password,
-        },
-    )
-    assert old_login_response.status_code == 401
-
-    new_login_response = client.post(
-        "/api/users/login",
-        json={
-            "email": updated_email,
-            "password": updated_password,
-        },
-    )
-
-    assert new_login_response.status_code == 200
-    new_login_data = new_login_response.get_json()
-    assert new_login_data["user"]["email"] == updated_email
-    assert new_login_data["user"]["id"] == registration_data["user"]["id"]
-    assert "token" in new_login_data
+    login_response = client.post("/api/users/login", json={"email": updated_email, "password": "anything"})
+    register_response = client.post("/api/users/register", json={})
+    assert login_response.status_code == 404
+    assert register_response.status_code == 404
 
 
-def test_admin_can_create_update_and_delete_flights_visible_to_users(client, admin_headers):
+def test_admin_can_create_update_and_delete_flights_visible_to_users(client, admin_headers, test_user):
     """Flight CRUD changes should be reflected across authenticated API endpoints."""
-    _user_payload, user_registration = _register_user(client)
+    user_registration = _issue_token_for_user(client, test_user)
     user_headers = _auth_headers(user_registration["token"])
 
     create_response = client.post(
@@ -174,9 +147,9 @@ def test_admin_can_create_update_and_delete_flights_visible_to_users(client, adm
     assert all(flight["id"] != flight_id for flight in deleted_search_data["flights"])
 
 
-def test_user_can_book_pay_and_observe_booking_state_changes(client, admin_headers):
+def test_user_can_book_pay_and_observe_booking_state_changes(client, admin_headers, test_user):
     """Booking, availability, payment, and retrieval endpoints should stay in sync."""
-    _user_payload, user_registration = _register_user(client)
+    user_registration = _issue_token_for_user(client, test_user)
     user_headers = _auth_headers(user_registration["token"])
 
     create_flight_response = client.post(
@@ -198,10 +171,12 @@ def test_user_can_book_pay_and_observe_booking_state_changes(client, admin_heade
         "/api/bookings/",
         headers=user_headers,
         json={
+            "user_id": user_registration["user"]["id"],
             "flight_id": flight_id,
             "passengers": [
                 {
                     "passenger_name": "Alex Flyer",
+                    "email": test_user.email,
                     "passenger_passport_num": "PX123456",
                     "seat_num": "4A",
                     "seat_class": "economy",

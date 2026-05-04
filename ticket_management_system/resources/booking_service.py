@@ -2,12 +2,13 @@
 from decimal import Decimal, ROUND_HALF_UP
 
 from ticket_management_system.extensions import db
-from ticket_management_system.models import Booking, BookingStatus, Flight, FlightStatus, SeatClass, Ticket
+from ticket_management_system.models import Booking, BookingStatus, Flight, FlightStatus, SeatClass, Ticket, User
 from ticket_management_system.exceptions import (
     FlightNotFoundError,
     SeatUnavailableError,
     BookingNotFoundError,
     BookingConflictError,
+    UserNotFoundError,
 )
 
 
@@ -83,6 +84,10 @@ class BookingService:
         if not isinstance(passengers, list) or len(passengers) == 0:
             raise ValueError("passengers must be a non-empty list")
 
+        # Raise an Exception if an invalid user_id was provided.
+        if user_id is not None and not User.query.filter_by(id=user_id).first():
+            raise UserNotFoundError(user_id)
+
         flight = Flight.query.filter_by(id=flight_id).first()
         if not flight:
             raise FlightNotFoundError(flight_id)
@@ -98,8 +103,30 @@ class BookingService:
         total_price = Decimal("0.00")
 
         try:
+            # Create or reuse a user from passenger email when no explicit user id is provided.
+            if user_id is None:
+                first_passenger = passengers[0]
+                email = first_passenger.get("email")
+                if not email:
+                    raise ValueError("First passenger email is required for booking ownership")
+
+                firstname, lastname = BookingService._get_passenger_names(first_passenger)
+                existing_user = User.query.filter_by(email=email).first()
+                if existing_user:
+                    booking_user_id = existing_user.id
+                else:
+                    newuser = User(
+                        firstname=firstname,
+                        lastname=lastname,
+                        email=email,
+                    )
+                    db.session.add(newuser)
+                    db.session.flush()
+                    booking_user_id = newuser.id
+            else:
+                booking_user_id = user_id
             booking = Booking(
-                user_id=user_id,
+                user_id= booking_user_id,
                 flight_id=flight.id,
                 total_price=Decimal("0.00"),
                 booking_status=normalized_booking_status
@@ -132,7 +159,7 @@ class BookingService:
         return {
             "booking": {
                 "id": str(booking.id),
-                "user_id": str(booking.user_id),
+                "user_id": str(booking.user_id) if booking.user_id else None,
                 "flight_id": str(booking.flight_id),
                 "total_price": str(booking.total_price),
                 "booking_status": booking.booking_status.name,
@@ -142,6 +169,8 @@ class BookingService:
                     {
                         "id": str(ticket.id),
                         "passenger_name": ticket.passenger_name,
+                        "passenger_fname": ticket.passenger_fname,
+                        "passenger_lname": ticket.passenger_lname,
                         "passenger_passport_num": ticket.passenger_passport_num,
                         "seat_num": ticket.seat_num,
                         "seat_class": ticket.seat_class.name,
@@ -149,7 +178,8 @@ class BookingService:
                         "created_at": ticket.created_at.isoformat()
                     }
                     for ticket in booking.tickets
-                ]
+                ],
+                "_links": BookingService._booking_links(booking)
             }
         }
 
@@ -158,22 +188,41 @@ class BookingService:
         """Format booking summary for list views."""
         return {
             "id": str(booking.id),
-            "user_id": str(booking.user_id),
+            "user_id": str(booking.user_id) if booking.user_id else None,
             "flight_id": str(booking.flight_id),
             "total_price": str(booking.total_price),
             "booking_status": booking.booking_status.name,
             "ticket_count": len(booking.tickets),
             "created_at": booking.created_at.isoformat(),
-            "updated_at": booking.updated_at.isoformat()
+            "updated_at": booking.updated_at.isoformat(),
+            "_links": BookingService._booking_links(booking)
+        }
+
+    @staticmethod
+    def _booking_links(booking):
+        """Return hypermedia links for booking-related next actions."""
+        booking_href = f"/api/bookings/{booking.id}"
+        return {
+            "self": {"href": booking_href, "method": "GET"},
+            "update": {"href": booking_href, "method": "PUT"},
+            "cancel": {"href": booking_href, "method": "DELETE"},
+            "payment": {"href": "/api/payments/", "method": "POST"},
+            "flight": {"href": f"/api/flights/{booking.flight_id}", "method": "GET"},
         }
 
     @staticmethod
     def _build_ticket(booking_id, flight, passenger, requested_seats):
-        required_fields = ["passenger_name", "passenger_passport_num", "seat_num"]
+        required_fields = ["passenger_passport_num", "seat_num"]
         missing_fields = [
             field for field in required_fields
             if field not in passenger or passenger[field] in (None, "")
         ]
+        passenger_fname, passenger_lname = BookingService._get_passenger_names(passenger)
+        uses_split_names = "passenger_fname" in passenger or "passenger_lname" in passenger
+        if not passenger_fname:
+            missing_fields.append("passenger_fname")
+        if (uses_split_names and not passenger_lname) or passenger_lname is None:
+            missing_fields.append("passenger_lname")
         if missing_fields:
             raise ValueError(f"Missing required passenger fields: {', '.join(missing_fields)}")
 
@@ -192,13 +241,35 @@ class BookingService:
         price = BookingService.calculate_ticket_price(flight.base_price, seat_class)
         return Ticket(
             booking_id=booking_id,
-            passenger_name=passenger["passenger_name"].strip(),
+            passenger_fname=passenger_fname,
+            passenger_lname=passenger_lname,
             passenger_passport_num=passenger["passenger_passport_num"].strip(),
             seat_num=seat_num,
             seat_class=seat_class,
             flight_id=flight.id,
             price=price
         )
+
+    @staticmethod
+    def _get_passenger_names(passenger):
+        """Return normalized first and last names from split or legacy name fields."""
+        passenger_fname = passenger.get("passenger_fname")
+        passenger_lname = passenger.get("passenger_lname")
+
+        if passenger_fname is not None or passenger_lname is not None:
+            passenger_fname = passenger_fname.strip() if isinstance(passenger_fname, str) else passenger_fname
+            passenger_lname = passenger_lname.strip() if isinstance(passenger_lname, str) else passenger_lname
+            return passenger_fname, passenger_lname
+
+        passenger_name = passenger.get("passenger_name")
+        if not isinstance(passenger_name, str):
+            return None, None
+
+        name_parts = passenger_name.strip().split(maxsplit=1)
+        if not name_parts:
+            return "", ""
+        passenger_lname = name_parts[1] if len(name_parts) > 1 else ""
+        return name_parts[0], passenger_lname
 
     @staticmethod
     def _parse_seat_class(seat_class):

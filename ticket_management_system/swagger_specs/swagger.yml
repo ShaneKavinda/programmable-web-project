@@ -1,10 +1,10 @@
 swagger: '2.0'
 info:
   title: Flight Management System API
-  description: RESTful API for managing flights, bookings, and user authentication
+  description: RESTful API for managing flights, bookings, payments, users, and auxiliary notification logs
   version: 1.0.0
 basePath: /api
-host: localhost:5000
+host: localhost:8080
 schemes:
 - http
 - https
@@ -20,6 +20,11 @@ securityDefinitions:
     description: >-
       JWT Authorization header using the Bearer scheme.
       Example: "Authorization: Bearer {token}"
+  ApiKeyAuth:
+    type: apiKey
+    name: x-api-key
+    in: header
+    description: Admin API key sent in x-api-key header.
 
 parameters:
   PageParam:
@@ -138,6 +143,24 @@ definitions:
     - error
     - message
 
+  Link:
+    type: object
+    properties:
+      href:
+        type: string
+        example: /api/bookings/{booking_id}
+      method:
+        type: string
+        example: GET
+      templated:
+        type: boolean
+        description: True when the href contains a placeholder that the client must replace.
+
+  Links:
+    type: object
+    additionalProperties:
+      $ref: '#/definitions/Link'
+
   User:
     type: object
     properties:
@@ -150,11 +173,6 @@ definitions:
         type: string
       email:
         type: string
-      role:
-        type: string
-        enum:
-        - user
-        - admin
       created_at:
         type: string
         format: date-time
@@ -171,13 +189,20 @@ definitions:
         $ref: '#/definitions/User'
       token:
         type: string
-        description: JWT token
+        description: Scoped JWT token
       token_type:
         type: string
         example: Bearer
       expires_in:
         type: integer
-        example: 86400
+        example: 1800
+      permitted_resources:
+        type: array
+        items:
+          type: string
+        example:
+        - flights:read
+        - users:read:self
 
   Ticket:
     type: object
@@ -186,6 +211,11 @@ definitions:
         type: string
         format: uuid
       passenger_name:
+        type: string
+        description: Legacy full name assembled from passenger_fname and passenger_lname.
+      passenger_fname:
+        type: string
+      passenger_lname:
         type: string
       passenger_passport_num:
         type: string
@@ -212,6 +242,8 @@ definitions:
       user_id:
         type: string
         format: uuid
+        x-nullable: true
+        description: Owner user identifier. Null for anonymous bookings.
       flight_id:
         type: string
         format: uuid
@@ -238,6 +270,8 @@ definitions:
         description: Full ticket details (only in detail views)
         items:
           $ref: '#/definitions/Ticket'
+      _links:
+        $ref: '#/definitions/Links'
 
   BookingResponse:
     type: object
@@ -283,6 +317,8 @@ definitions:
       updated_at:
         type: string
         format: date-time
+      _links:
+        $ref: '#/definitions/Links'
 
   Pagination:
     type: object
@@ -358,135 +394,37 @@ definitions:
         type: boolean
 
 paths:
-  /users/register:
-    post:
-      summary: User registration
-      description: Register a new user account. Returns a JWT token for immediate authentication.
-      operationId: registerUser
+  /users/{user_id}/token:
+    get:
+      summary: Issue scoped token by path user ID
+      description: Issue a short-lived JWT for an existing user ID supplied in the URL.
+      operationId: issueUserTokenById
       tags:
       - Authentication
       parameters:
-      - in: body
-        name: body
+      - name: user_id
+        in: path
         required: true
-        schema:
-          type: object
-          required:
-          - firstname
-          - lastname
-          - email
-          - password
-          properties:
-            firstname:
-              type: string
-              maxLength: 30
-              example: John
-            lastname:
-              type: string
-              maxLength: 30
-              example: Doe
-            email:
-              type: string
-              format: email
-              example: john@example.com
-            password:
-              type: string
-              minLength: 6
-              format: password
-              example: password123
-            role:
-              type: string
-              enum:
-              - user
-              - admin
-              default: user
-      responses:
-        201:
-          description: User registered successfully
-          schema:
-            $ref: '#/definitions/UserResponse'
-          examples:
-            application/json:
-              message: User registered successfully
-              user:
-                id: 550e8400-e29b-41d4-a716-446655440000
-                firstname: John
-                lastname: Doe
-                email: john@example.com
-                role: user
-                created_at: '2026-04-06T10:30:00'
-              token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-              token_type: Bearer
-              expires_in: 86400
-        400:
-          description: Validation error
-          schema:
-            $ref: '#/definitions/ValidationError'
-          examples:
-            application/json: &validation_error_example
-              error: Bad Request
-              message: Validation failed
-              errors:
-                field:
-                - Validation error message
-        409:
-          description: Email already exists
-          schema:
-            $ref: '#/definitions/ConflictError'
-          examples:
-            application/json: &conflict_error_example
-              error: Conflict
-              message: Resource already exists or operation cannot be completed
-
-  /users/login:
-    post:
-      summary: User login
-      description: Authenticate a user with email and password. Returns a JWT token for subsequent requests.
-      operationId: loginUser
-      tags:
-      - Authentication
-      parameters:
-      - in: body
-        name: body
-        required: true
-        schema:
-          type: object
-          required:
-          - email
-          - password
-          properties:
-            email:
-              type: string
-              format: email
-              example: john@example.com
-            password:
-              type: string
-              minLength: 6
-              example: password123
+        type: string
+        format: uuid
       responses:
         200:
-          description: Login successful
+          description: Token issued successfully
           schema:
             $ref: '#/definitions/UserResponse'
-        400:
-          description: Missing required fields
+        404:
+          description: User not found
           schema:
-            $ref: '#/definitions/ValidationError'
+            $ref: '#/definitions/NotFoundError'
           examples:
-            application/json: *validation_error_example
-        401:
-          description: Invalid credentials
-          schema:
-            $ref: '#/definitions/AuthError'
-          examples:
-            application/json: &auth_error_example
-              error: Unauthorized
-              message: Invalid or missing authentication token
+            application/json: &not_found_error_example
+              error: Not Found
+              message: Resource not found
 
   /users/me:
     get:
-      summary: Get current user profile
-      description: Retrieve the profile information of the currently authenticated user.
+      summary: Get token user profile
+      description: Retrieve the profile information for the identity carried by the bearer token.
       operationId: getCurrentUser
       tags:
       - Users
@@ -505,10 +443,12 @@ paths:
           schema:
             $ref: '#/definitions/AuthError'
           examples:
-            application/json: *auth_error_example
+            application/json: &auth_error_example
+              error: Unauthorized
+              message: Invalid or missing authentication token
     patch:
-      summary: Update current user profile
-      description: Update the profile information of the currently authenticated user.
+      summary: Update token user profile
+      description: Update the profile information for the identity carried by the bearer token.
       operationId: updateCurrentUser
       tags:
       - Users
@@ -530,9 +470,6 @@ paths:
             email:
               type: string
               format: email
-            password:
-              type: string
-              minLength: 6
       responses:
         200:
           description: Profile updated successfully
@@ -548,7 +485,12 @@ paths:
           schema:
             $ref: '#/definitions/ValidationError'
           examples:
-            application/json: *validation_error_example
+            application/json: &validation_error_example
+              error: Bad Request
+              message: Validation failed
+              errors:
+                field:
+                - Validation error message
         401:
           description: Unauthorized
           schema:
@@ -560,17 +502,19 @@ paths:
           schema:
             $ref: '#/definitions/ConflictError'
           examples:
-            application/json: *conflict_error_example
+            application/json: &conflict_error_example
+              error: Conflict
+              message: Resource already exists or operation cannot be completed
 
   /users/:
     get:
       summary: List all users (Admin only)
-      description: Get a paginated list of all users in the system. Only administrators can access this endpoint.
+      description: Get a paginated list of all users in the system. Access requires admin API key.
       operationId: listUsers
       tags:
       - Users
       security:
-      - Bearer: []
+      - ApiKeyAuth: []
       parameters:
       - $ref: '#/parameters/PageParam'
       - $ref: '#/parameters/PerPageParam'
@@ -586,7 +530,7 @@ paths:
           examples:
             application/json: *auth_error_example
         403:
-          description: Forbidden - Admin privileges required
+          description: Forbidden - Invalid API key
           schema:
             $ref: '#/definitions/ForbiddenError'
           examples:
@@ -601,19 +545,11 @@ paths:
       operationId: listAirports
       tags:
       - Flights
-      security:
-      - Bearer: []
       responses:
         200:
           description: List of airports
           schema:
             $ref: '#/definitions/AirportListResponse'
-        401:
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/AuthError'
-          examples:
-            application/json: *auth_error_example
 
   /flights/search:
     get:
@@ -622,8 +558,6 @@ paths:
       operationId: searchFlights
       tags:
       - Flights
-      security:
-      - Bearer: []
       parameters:
       - name: status
         in: query
@@ -686,22 +620,16 @@ paths:
             $ref: '#/definitions/ValidationError'
           examples:
             application/json: *validation_error_example
-        401:
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/AuthError'
-          examples:
-            application/json: *auth_error_example
 
   /flights:
     post:
       summary: Add a new flight (Admin only)
-      description: Create a new flight in the system. Only administrators can add flights.
+      description: Create a new flight in the system. Access requires admin API key.
       operationId: addFlight
       tags:
       - Flights
       security:
-      - Bearer: []
+      - ApiKeyAuth: []
       parameters:
       - in: body
         name: body
@@ -762,7 +690,7 @@ paths:
           examples:
             application/json: *auth_error_example
         403:
-          description: Forbidden - Admin privileges required
+          description: Forbidden - Invalid API key
           schema:
             $ref: '#/definitions/ForbiddenError'
           examples:
@@ -781,8 +709,6 @@ paths:
       operationId: getFlightById
       tags:
       - Flights
-      security:
-      - Bearer: []
       parameters:
       - $ref: '#/parameters/FlightIdParam'
       responses:
@@ -793,28 +719,20 @@ paths:
             properties:
               flight:
                 $ref: '#/definitions/Flight'
-        401:
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/AuthError'
-          examples:
-            application/json: *auth_error_example
         404:
           description: Flight not found
           schema:
             $ref: '#/definitions/NotFoundError'
           examples:
-            application/json: &not_found_error_example
-              error: Not Found
-              message: Resource not found
+            application/json: *not_found_error_example
     delete:
       summary: Delete a flight (Admin only)
-      description: Delete a flight from the system. Only administrators can delete flights.
+      description: Delete a flight from the system. Access requires admin API key.
       operationId: deleteFlight
       tags:
       - Flights
       security:
-      - Bearer: []
+      - ApiKeyAuth: []
       parameters:
       - $ref: '#/parameters/FlightIdParam'
       responses:
@@ -832,7 +750,7 @@ paths:
           examples:
             application/json: *auth_error_example
         403:
-          description: Forbidden - Admin privileges required
+          description: Forbidden - Invalid API key
           schema:
             $ref: '#/definitions/ForbiddenError'
           examples:
@@ -845,12 +763,12 @@ paths:
             application/json: *not_found_error_example
     put:
       summary: Update a flight (Admin only)
-      description: Update flight details. Only administrators can update flights.
+      description: Update flight details. Access requires admin API key.
       operationId: updateFlight
       tags:
       - Flights
       security:
-      - Bearer: []
+      - ApiKeyAuth: []
       parameters:
       - $ref: '#/parameters/FlightIdParam'
       - in: body
@@ -904,7 +822,7 @@ paths:
           examples:
             application/json: *auth_error_example
         403:
-          description: Forbidden - Admin privileges required
+          description: Forbidden - Invalid API key
           schema:
             $ref: '#/definitions/ForbiddenError'
           examples:
@@ -919,12 +837,10 @@ paths:
   /bookings:
     post:
       summary: Create a new booking
-      description: Create a new flight booking with one or more passengers.
+      description: Create a flight booking with one or more passengers. Authentication is not required. The first passenger email is required for booking ownership and receipt delivery; it is used to assign the booking to an existing user or create a new user.
       operationId: createBooking
       tags:
       - Bookings
-      security:
-      - Bearer: []
       parameters:
       - in: body
         name: body
@@ -935,21 +851,37 @@ paths:
           - flight_id
           - passengers
           properties:
+            user_id:
+              type: string
+              format: uuid
+              x-nullable: true
+              description: Optional user identifier for clients that want to associate the booking with an existing user.
             flight_id:
               type: string
               format: uuid
             passengers:
               type: array
               minItems: 1
+              description: First passenger must include email. Additional passenger emails are optional.
               items:
                 type: object
                 required:
-                - passenger_name
+                - passenger_fname
+                - passenger_lname
                 - passenger_passport_num
                 - seat_num
                 properties:
                   passenger_name:
                     type: string
+                    description: Legacy alternative to passenger_fname/passenger_lname.
+                  passenger_fname:
+                    type: string
+                  passenger_lname:
+                    type: string
+                  email:
+                    type: string
+                    format: email
+                    description: Required on the first passenger for booking ownership and receipt delivery; optional for additional passengers.
                   passenger_passport_num:
                     type: string
                   seat_num:
@@ -971,14 +903,8 @@ paths:
             $ref: '#/definitions/ValidationError'
           examples:
             application/json: *validation_error_example
-        401:
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/AuthError'
-          examples:
-            application/json: *auth_error_example
         404:
-          description: Flight not found
+          description: Flight or user not found
           schema:
             $ref: '#/definitions/NotFoundError'
           examples:
@@ -991,7 +917,7 @@ paths:
             application/json: *conflict_error_example
     get:
       summary: List bookings
-      description: List bookings for the current user or all users (admin only).
+      description: List bookings with pagination for the authenticated token owner.
       operationId: listBookings
       tags:
       - Bookings
@@ -1000,10 +926,6 @@ paths:
       parameters:
       - $ref: '#/parameters/PageParam'
       - $ref: '#/parameters/PerPageParam'
-      - name: all
-        in: query
-        type: boolean
-        description: Admin only - return all bookings
       responses:
         200:
           description: Paginated list of bookings
@@ -1021,11 +943,17 @@ paths:
             $ref: '#/definitions/AuthError'
           examples:
             application/json: *auth_error_example
+        403:
+          description: Forbidden - missing required token scope
+          schema:
+            $ref: '#/definitions/ForbiddenError'
+          examples:
+            application/json: *forbidden_error_example
 
   /bookings/{booking_id}:
     get:
       summary: Get booking details
-      description: Retrieve details of a specific booking including tickets.
+      description: Retrieve details of a specific booking owned by the authenticated token user.
       operationId: getBooking
       tags:
       - Bookings
@@ -1048,7 +976,7 @@ paths:
           examples:
             application/json: *auth_error_example
         403:
-          description: Forbidden
+          description: Forbidden - booking does not belong to the token user
           schema:
             $ref: '#/definitions/ForbiddenError'
           examples:
@@ -1061,7 +989,7 @@ paths:
             application/json: *not_found_error_example
     put:
       summary: Update booking status
-      description: Update the status of an existing booking.
+      description: Update the status of an existing booking owned by the authenticated token user.
       operationId: updateBooking
       tags:
       - Bookings
@@ -1102,7 +1030,7 @@ paths:
           examples:
             application/json: *auth_error_example
         403:
-          description: Forbidden
+          description: Forbidden - booking does not belong to the token user
           schema:
             $ref: '#/definitions/ForbiddenError'
           examples:
@@ -1121,12 +1049,15 @@ paths:
             application/json: *conflict_error_example
     delete:
       summary: Cancel booking
-      description: Cancel an existing booking by setting its status to cancelled.
+      description: >-
+        Cancel an existing booking. Use Bearer token with bookings:write as the owner,
+        or send x-api-key (admin API key) to cancel any user's booking (no Bearer required).
       operationId: cancelBooking
       tags:
       - Bookings
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       parameters:
       - $ref: '#/parameters/BookingIdParam'
       responses:
@@ -1141,7 +1072,7 @@ paths:
           examples:
             application/json: *auth_error_example
         403:
-          description: Forbidden
+          description: Forbidden — booking does not belong to the token user, or invalid x-api-key when cancelling as admin
           schema:
             $ref: '#/definitions/ForbiddenError'
           examples:
@@ -1162,12 +1093,10 @@ paths:
   /bookings/availability:
     get:
       summary: Check seat availability
-      description: Check if a specific seat is available on a given flight.
+      description: Check if a specific seat is available on a given flight. Authentication is not required.
       operationId: checkAvailability
       tags:
       - Bookings
-      security:
-      - Bearer: []
       parameters:
       - name: flight_id
         in: query
@@ -1189,12 +1118,6 @@ paths:
             $ref: '#/definitions/ValidationError'
           examples:
             application/json: *validation_error_example
-        401:
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/AuthError'
-          examples:
-            application/json: *auth_error_example
 
   /payments:
     post:
@@ -1268,3 +1191,48 @@ paths:
             $ref: '#/definitions/ConflictError'
           examples:
             application/json: *conflict_error_example
+
+  /aux/notifications:
+    get:
+      summary: List auxiliary notification logs (Admin only)
+      description: Fetch notification logs proxied from the notification auxiliary service. Access requires admin API key.
+      operationId: listAuxiliaryNotifications
+      tags:
+      - Auxiliary
+      security:
+      - ApiKeyAuth: []
+      parameters:
+      - name: booking_id
+        in: query
+        type: string
+        format: uuid
+        description: Optional booking ID filter
+      - name: limit
+        in: query
+        type: integer
+        default: 50
+        minimum: 1
+        maximum: 200
+        description: Maximum number of notification records to return
+      responses:
+        200:
+          description: Notification logs fetched successfully
+          schema:
+            type: object
+            additionalProperties: true
+        400:
+          description: Invalid limit parameter
+          schema:
+            $ref: '#/definitions/Error'
+        401:
+          description: Missing x-api-key header
+          schema:
+            $ref: '#/definitions/AuthError'
+        403:
+          description: Forbidden - Invalid API key
+          schema:
+            $ref: '#/definitions/ForbiddenError'
+        503:
+          description: Auxiliary service unavailable
+          schema:
+            $ref: '#/definitions/Error'

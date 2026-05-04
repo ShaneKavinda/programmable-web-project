@@ -11,23 +11,15 @@ def _utcnow():
     """Return current UTC time as a timezone-aware datetime."""
     return datetime.now(timezone.utc)
 
-# pylint: disable=invalid-name
-class Roles(enum.Enum):
-    """User roles enum."""
-    admin = 1
-    user = 2
-
 # pylint: disable=too-few-public-methods
 class User(db.Model):
-    """User model for authentication and authorization."""
+    """User model for identity and authorization."""
     __tablename__ = 'users'
 
     id = db.Column(db.UUID, primary_key=True, default=uuid.uuid4)
     firstname = db.Column(db.String(60), nullable=False)
     lastname = db.Column(db.String(60), nullable=False)
     email = db.Column(db.String(255), nullable=False, unique=True)
-    password_hash = db.Column(db.String(255), nullable=False)
-    role = db.Column(Enum(Roles), nullable=False, default=Roles.user)
     created_at = db.Column(db.DateTime, nullable=False, default=_utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
 
@@ -102,7 +94,8 @@ class Ticket(db.Model):
 
     id = db.Column(db.UUID, primary_key=True, default=uuid.uuid4)
     booking_id = db.Column(db.UUID, db.ForeignKey("bookings.id", ondelete="CASCADE"))
-    passenger_name = db.Column(db.String(50), nullable=False)
+    passenger_fname = db.Column(db.String(50), nullable=False)
+    passenger_lname = db.Column(db.String(50), nullable=False)
     passenger_passport_num = db.Column(db.String(12), nullable=False)
     seat_num = db.Column(db.String(4), nullable=False)
     flight_id = db.Column(db.UUID, db.ForeignKey("flights.id", ondelete="CASCADE"))
@@ -113,3 +106,15 @@ class Ticket(db.Model):
 
     flight = db.relationship("Flight", back_populates="tickets")
     booking = db.relationship("Booking", back_populates="tickets")
+
+    @property
+    def passenger_name(self):
+        """Return the passenger's full name for legacy callers."""
+        return f"{self.passenger_fname} {self.passenger_lname}".strip()
+
+    @passenger_name.setter
+    def passenger_name(self, value):
+        """Split a legacy full passenger name into first and last name fields."""
+        name_parts = value.strip().split(maxsplit=1) if isinstance(value, str) else []
+        self.passenger_fname = name_parts[0] if name_parts else ""
+        self.passenger_lname = name_parts[1] if len(name_parts) > 1 else ""

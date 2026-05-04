@@ -2,56 +2,45 @@
 import os
 from datetime import datetime, timedelta, timezone
 import jwt
-from werkzeug.security import generate_password_hash, check_password_hash
 from ticket_management_system.extensions import db
-from ticket_management_system.models import User, Roles
+from ticket_management_system.models import User
 from ticket_management_system.utils import format_pagination_response
 from ticket_management_system.exceptions import (
-    InvalidCredentialsError,
     UserNotFoundError,
     TokenExpiredError,
     InvalidTokenError,
     EmailAlreadyExistsError,
-    InvalidRoleError
+    ResourcePermissionError,
 )
 
 # JWT Configuration
 JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'dummy-secret-key-for-development')
 JWT_ALGORITHM = 'HS256'
-JWT_EXPIRATION_HOURS = 24
+JWT_EXPIRATION_MINUTES = int(os.getenv('JWT_EXPIRATION_MINUTES', '30'))
+JWT_EXPIRATION_SECONDS = JWT_EXPIRATION_MINUTES * 60
 
-
+USER_RESOURCES = (
+    'flights:read',
+    'bookings:read',
+    'bookings:write',
+    'payments:create',
+    'users:read:self',
+    'users:update:self',
+)
 class UserService:
     """Service class for user operations."""
-    @staticmethod
-    def validate_role(role_str):
-        """Validate and convert role string to Roles enum."""
-        if not role_str:
-            return Roles.user
-
-        role_str = role_str.lower()
-        if role_str == 'admin':
-            return Roles.admin
-        if role_str == 'user':
-            return Roles.user
-        raise InvalidRoleError(role_str)
-
     @staticmethod
     def email_exists(email):
         """Check if email already exists in database."""
         return User.query.filter_by(email=email).first() is not None
 
     @staticmethod
-    def create_user(firstname, lastname, email, password, role=Roles.user):
-        """Create a new user with hashed password."""
-        password_hash = generate_password_hash(password)
-
+    def create_user(firstname, lastname, email):
+        """Create a new user identity."""
         new_user = User(
             firstname=firstname,
             lastname=lastname,
             email=email,
-            password_hash=password_hash,
-            role=role
         )
 
         db.session.add(new_user)
@@ -60,14 +49,25 @@ class UserService:
         return new_user
 
     @staticmethod
-    def generate_token(user):
-        """Generate JWT token for user authentication."""
+    def get_permitted_resources(_user):
+        """Return the resource scopes allowed for a user."""
+        return list(USER_RESOURCES)
+
+    @staticmethod
+    def token_expires_in_seconds():
+        """Return token lifetime in seconds."""
+        return JWT_EXPIRATION_SECONDS
+
+    @staticmethod
+    def generate_token(user, permitted_resources=None):
+        """Generate a scoped JWT token for a user identity."""
+        issued_at = datetime.now(timezone.utc)
         token_payload = {
             'user_id': str(user.id),
             'email': user.email,
-            'role': user.role.name,
-            'exp': datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS),
-            'iat': datetime.now(timezone.utc)
+            'permitted_resources': list(permitted_resources or UserService.get_permitted_resources(user)),
+            'exp': issued_at + timedelta(seconds=JWT_EXPIRATION_SECONDS),
+            'iat': issued_at
         }
 
         token = jwt.encode(token_payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
@@ -75,42 +75,30 @@ class UserService:
 
     @staticmethod
     def format_user_response(user, include_token=False):
-        """Format user data for API response, optionally including JWT token."""
+        """Format user data for API response, optionally including a scoped token."""
         response = {
             'user': {
                 'id': str(user.id),
                 'firstname': user.firstname,
                 'lastname': user.lastname,
                 'email': user.email,
-                'role': user.role.name,
                 'created_at': user.created_at.isoformat()
             }
         }
 
         if include_token:
+            permitted_resources = UserService.get_permitted_resources(user)
             token = UserService.generate_token(user)
             response['token'] = token
             response['token_type'] = 'Bearer'
-            response['expires_in'] = JWT_EXPIRATION_HOURS * 3600  # seconds
+            response['expires_in'] = JWT_EXPIRATION_SECONDS
+            response['permitted_resources'] = permitted_resources
 
         return response
 
     @staticmethod
-    def authenticate_user(email, password):
-        """Authenticate user with credentials."""
-        user = User.query.filter_by(email=email).first()
-
-        if not user:
-            raise InvalidCredentialsError()
-
-        if not check_password_hash(user.password_hash, password):
-            raise InvalidCredentialsError()
-
-        return user
-
-    @staticmethod
-    def verify_token(token):
-        """Verify and decode JWT token, return user or raise exception."""
+    def verify_token(token, required_resource=None):
+        """Verify a scoped JWT token, return user or raise exception."""
         try:
             import uuid as uuid_lib
             payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
@@ -125,11 +113,18 @@ class UserService:
             if not user:
                 raise UserNotFoundError()
 
+            if required_resource:
+                permitted_resources = payload.get('permitted_resources', [])
+                if required_resource not in permitted_resources:
+                    raise ResourcePermissionError(required_resource)
+
             return user
 
         except jwt.ExpiredSignatureError as exc:
             raise TokenExpiredError() from exc
-        except jwt.InvalidTokenError as exc:
+        except ResourcePermissionError:
+            raise
+        except (KeyError, ValueError, jwt.InvalidTokenError) as exc:
             raise InvalidTokenError() from exc
 
     @staticmethod
@@ -165,14 +160,13 @@ class UserService:
                 'firstname': user.firstname,
                 'lastname': user.lastname,
                 'email': user.email,
-                'role': user.role.name,
                 'created_at': user.created_at.isoformat(),
                 'updated_at': user.updated_at.isoformat()
             }
         }
 
     @staticmethod
-    def update_user_profile(user, firstname=None, lastname=None, email=None, password=None):
+    def update_user_profile(user, firstname=None, lastname=None, email=None):
         """Update user profile."""
         # Validate email uniqueness if provided
         if email and email != user.email:
@@ -187,10 +181,6 @@ class UserService:
         # Update lastname if provided
         if lastname is not None:
             user.lastname = lastname
-
-        # Update password if provided (hash it)
-        if password is not None:
-            user.password_hash = generate_password_hash(password)
 
         user.updated_at = datetime.now(timezone.utc)
 
