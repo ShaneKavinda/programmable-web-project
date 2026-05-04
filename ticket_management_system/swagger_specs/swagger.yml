@@ -143,6 +143,24 @@ definitions:
     - error
     - message
 
+  Link:
+    type: object
+    properties:
+      href:
+        type: string
+        example: /api/bookings/{booking_id}
+      method:
+        type: string
+        example: GET
+      templated:
+        type: boolean
+        description: True when the href contains a placeholder that the client must replace.
+
+  Links:
+    type: object
+    additionalProperties:
+      $ref: '#/definitions/Link'
+
   User:
     type: object
     properties:
@@ -252,6 +270,8 @@ definitions:
         description: Full ticket details (only in detail views)
         items:
           $ref: '#/definitions/Ticket'
+      _links:
+        $ref: '#/definitions/Links'
 
   BookingResponse:
     type: object
@@ -297,6 +317,8 @@ definitions:
       updated_at:
         type: string
         format: date-time
+      _links:
+        $ref: '#/definitions/Links'
 
   Pagination:
     type: object

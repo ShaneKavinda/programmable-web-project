@@ -178,7 +178,8 @@ class BookingService:
                         "created_at": ticket.created_at.isoformat()
                     }
                     for ticket in booking.tickets
-                ]
+                ],
+                "_links": BookingService._booking_links(booking)
             }
         }
 
@@ -193,7 +194,20 @@ class BookingService:
             "booking_status": booking.booking_status.name,
             "ticket_count": len(booking.tickets),
             "created_at": booking.created_at.isoformat(),
-            "updated_at": booking.updated_at.isoformat()
+            "updated_at": booking.updated_at.isoformat(),
+            "_links": BookingService._booking_links(booking)
+        }
+
+    @staticmethod
+    def _booking_links(booking):
+        """Return hypermedia links for booking-related next actions."""
+        booking_href = f"/api/bookings/{booking.id}"
+        return {
+            "self": {"href": booking_href, "method": "GET"},
+            "update": {"href": booking_href, "method": "PUT"},
+            "cancel": {"href": booking_href, "method": "DELETE"},
+            "payment": {"href": "/api/payments/", "method": "POST"},
+            "flight": {"href": f"/api/flights/{booking.flight_id}", "method": "GET"},
         }
 
     @staticmethod
