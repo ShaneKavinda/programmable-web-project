@@ -10,9 +10,19 @@ find /app -type f -name "*.pyc" -delete 2>/dev/null || true
 
 FLASK_APP_TARGET="app:app"
 
-# Wait for PostgreSQL
-echo "Waiting for PostgreSQL..."
-while ! nc -z postgres 5432; do
+# Wait for PostgreSQL. AWS deployments use RDS, so derive the host/port from
+# DATABASE_URL unless DB_HOST/DB_PORT are explicitly provided.
+DB_WAIT_HOST="${DB_HOST:-}"
+DB_WAIT_PORT="${DB_PORT:-}"
+if [ -z "$DB_WAIT_HOST" ]; then
+    DB_WAIT_HOST="$(python -c "from urllib.parse import urlparse; import os; u=urlparse(os.environ.get('DATABASE_URL', '')); print(u.hostname or 'postgres')")"
+fi
+if [ -z "$DB_WAIT_PORT" ]; then
+    DB_WAIT_PORT="$(python -c "from urllib.parse import urlparse; import os; u=urlparse(os.environ.get('DATABASE_URL', '')); print(u.port or 5432)")"
+fi
+
+echo "Waiting for PostgreSQL at ${DB_WAIT_HOST}:${DB_WAIT_PORT}..."
+while ! nc -z "$DB_WAIT_HOST" "$DB_WAIT_PORT"; do
   sleep 0.5
 done
 echo "PostgreSQL is ready!"

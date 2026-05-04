@@ -1,0 +1,88 @@
+services:
+  notification-auxiliary-service:
+    build:
+      context: ../notification-auxiliary-service
+      dockerfile: Dockerfile
+    restart: always
+    expose:
+      - "5051"
+    environment:
+      - TZ=Europe/Helsinki
+      - PORT=5051
+      - AUX_DB_PATH=/app/data/notifications.db
+      - BOOKING_SWEEP_ENABLED=${AUX_BOOKING_SWEEP_ENABLED:-true}
+      - BOOKING_SWEEP_INTERVAL_SECONDS=${AUX_BOOKING_SWEEP_INTERVAL_SECONDS:-600}
+      - MAIN_API_BASE_URL=http://flask-app:5000
+      - MAIN_API_ADMIN_API_KEY=${AUX_MAIN_API_ADMIN_API_KEY:-${ADMIN_API_KEY:-}}
+    volumes:
+      - notification_aux_data:/app/data
+    depends_on:
+      flask-app:
+        condition: service_healthy
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5051/health', timeout=3)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  flask-app:
+    build:
+      context: ..
+      dockerfile: ticket_management_system/Dockerfile
+    restart: always
+    expose:
+      - "5000"
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Helsinki
+      - FLASK_APP=ticket_management_system.app:app
+      - FLASK_ENV=production
+      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-1}
+      - GUNICORN_THREADS=${GUNICORN_THREADS:-2}
+      - GUNICORN_MAX_REQUESTS=${GUNICORN_MAX_REQUESTS:-1000}
+      - GUNICORN_MAX_REQUESTS_JITTER=${GUNICORN_MAX_REQUESTS_JITTER:-100}
+      - DATABASE_URL=${DATABASE_URL}
+      - ADMIN_API_KEY=${ADMIN_API_KEY:-}
+      - NOTIFICATION_AUX_BASE_URL=http://notification-auxiliary-service:5051
+      - NOTIFICATION_AUX_TIMEOUT_SEC=1.5
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  nginx:
+    image: nginx:alpine
+    restart: always
+    environment:
+      TZ: Europe/Helsinki
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.aws.conf:/etc/nginx/nginx.conf:ro
+      - ../flight-client-app/dist:/usr/share/nginx/html:ro
+    depends_on:
+      flask-app:
+        condition: service_healthy
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  notification_aux_data:
+
+networks:
+  backend:
+    driver: bridge
