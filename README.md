@@ -98,7 +98,7 @@ VITE_API_BASE_URL=http://localhost:8080
 
 ## AWS Free-Tier Deployment
 
-Use the `AWS` branch for this deployment refactor. The AWS Compose file keeps Flask, Nginx, and the notification auxiliary service in Docker, but removes the local PostgreSQL container so the app can use Amazon RDS PostgreSQL.
+The AWS Compose file keeps Flask, Nginx, and the notification auxiliary service in Docker, but removes the local PostgreSQL container so the app can use Amazon RDS PostgreSQL.
 
 Before deploying, create new secrets and keep them out of Git:
 
