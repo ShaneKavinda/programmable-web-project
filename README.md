@@ -96,6 +96,69 @@ For local development, set `flight-client-app/.env`:
 VITE_API_BASE_URL=http://localhost:8080
 ```
 
+## AWS Free-Tier Deployment
+
+Use the `AWS` branch for this deployment refactor. The AWS Compose file keeps Flask, Nginx, and the notification auxiliary service in Docker, but removes the local PostgreSQL container so the app can use Amazon RDS PostgreSQL.
+
+Before deploying, create new secrets and keep them out of Git:
+
+```bash
+cp ticket_management_system/.env.example ticket_management_system/.env
+```
+
+For RDS, set `DATABASE_URL` to the private RDS endpoint:
+
+```env
+POSTGRES_DB=flask_db
+POSTGRES_USER=flask_user
+POSTGRES_PASSWORD=your-rds-password
+SECRET_KEY=your-new-random-secret
+JWT_SECRET_KEY=your-new-random-secret
+ADMIN_API_KEY=your-new-random-admin-key
+DATABASE_URL=postgresql://flask_user:your-rds-password@your-rds-endpoint.amazonaws.com:5432/flask_db
+GUNICORN_WORKERS=1
+GUNICORN_THREADS=2
+```
+
+Build the React client for same-origin API access:
+
+```bash
+cd flight-client-app
+cp .env.production.example .env
+npm install
+npm run build
+cd ..
+```
+
+Start the AWS stack from the repository root:
+
+```bash
+docker compose -f ticket_management_system/docker-compose.aws.yml up -d --build
+```
+
+Run migrations against RDS:
+
+```bash
+docker compose -f ticket_management_system/docker-compose.aws.yml exec flask-app flask db upgrade --directory ticket_management_system/migrations
+```
+
+Optional sample data:
+
+```bash
+docker compose -f ticket_management_system/docker-compose.aws.yml exec flask-app python -m ticket_management_system.populate_db
+```
+
+Verification endpoints:
+
+```text
+http://EC2_PUBLIC_IP/health
+http://EC2_PUBLIC_IP/healthz
+http://EC2_PUBLIC_IP/apidocs/
+```
+
+The AWS Nginx config listens on port `80` and serves `flight-client-app/dist` while proxying `/api/`, `/health`, `/apidocs/`, and Swagger assets to Flask.
+Swagger uses the same host that served `/apidocs/`, so "Try it out" works on both local Docker and EC2 without hard-coding a public IP.
+
 ## Authentication Notes
 
 The old `POST /api/users/login`, `POST /api/users/register`, and `POST /api/users/token` endpoints have been removed.
@@ -105,6 +168,7 @@ Current flow:
 - Create bookings without an account-style login flow.
 - Issue a user token with `GET /api/users/<user_id>/token`.
 - Use `Authorization: Bearer <token>` for user-owned actions.
+- In Swagger UI, click **Authorize** and paste the full value `Bearer <token>`, not only the raw token.
 - Use `x-api-key: <ADMIN_API_KEY>` for admin-only actions.
 
 Admin routes include user listing, flight create/update/delete, and admin booking cancellation.

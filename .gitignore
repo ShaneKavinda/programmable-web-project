@@ -1,3 +1,6 @@
 ticket_management_system/migrations/__pycache__
 ticket_management_system/migrations/versions/__pycache__
 __pycache__
+ticket_management_system/.env
+flight-client-app/.env
+flight-client-app/dist/

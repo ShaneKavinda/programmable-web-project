@@ -39,8 +39,8 @@ def create_app():
                 "name": "Authorization",
                 "in": "header",
                 "description": (
-                    'JWT Authorization header using the Bearer scheme. Example: "Authorization: '
-                    'Bearer {token}"'
+                    "JWT Authorization header using the Bearer scheme. In Swagger UI, paste "
+                    'the full value "Bearer {token}", not only the raw token.'
                 ),
             }
         },
