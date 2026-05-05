@@ -168,6 +168,7 @@ Current flow:
 - Create bookings without an account-style login flow.
 - Issue a user token with `GET /api/users/<user_id>/token`.
 - Use `Authorization: Bearer <token>` for user-owned actions.
+- In Swagger UI, click **Authorize** and paste the full value `Bearer <token>`, not only the raw token.
 - Use `x-api-key: <ADMIN_API_KEY>` for admin-only actions.
 
 Admin routes include user listing, flight create/update/delete, and admin booking cancellation.

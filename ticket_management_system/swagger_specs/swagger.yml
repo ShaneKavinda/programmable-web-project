@@ -15,7 +15,9 @@ securityDefinitions:
     in: header
     description: >-
       JWT Authorization header using the Bearer scheme.
-      Example: "Authorization: Bearer {token}"
+      In Swagger UI, paste the full value into Authorize:
+      "Bearer {token}". Do not paste only the raw token.
+      The resulting header is "Authorization: Bearer {token}".
   ApiKeyAuth:
     type: apiKey
     name: x-api-key
