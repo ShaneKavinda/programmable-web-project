@@ -157,6 +157,7 @@ http://EC2_PUBLIC_IP/apidocs/
 ```
 
 The AWS Nginx config listens on port `80` and serves `flight-client-app/dist` while proxying `/api/`, `/health`, `/apidocs/`, and Swagger assets to Flask.
+Swagger uses the same host that served `/apidocs/`, so "Try it out" works on both local Docker and EC2 without hard-coding a public IP.
 
 ## Authentication Notes
 

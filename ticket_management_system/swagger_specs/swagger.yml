@@ -4,10 +4,6 @@ info:
   description: RESTful API for managing flights, bookings, payments, users, and auxiliary notification logs
   version: 1.0.0
 basePath: /api
-host: localhost:8080
-schemes:
-- http
-- https
 consumes:
 - application/json
 produces:
