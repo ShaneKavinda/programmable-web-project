@@ -148,10 +148,6 @@ python -m ticket_management_system.populate_db
 
 **⚠️ Warning:** The `populate_db.py` script will **DELETE all existing data** before creating new data. Only use this for development/testing!
 
-**Test Credentials After Population:**
-- Admin: `admin@flightsystem.com` / `admin123`
-- User: `john.doe@example.com` / `password123`
-
 **Verify the populated data:**
 ```bash
 # Check record counts
@@ -206,19 +202,6 @@ python -m ticket_management_system.populate_db
 - **~50 Flights**: Random routes between major US airports over next 30 days
 - **~15-20 Bookings**: Distributed across users with realistic statuses
 - **~30-50 Tickets**: Various seat classes (economy, business, first) with proper pricing
-
-**Test Credentials:**
-```
-Admin Account:
-  Email: admin@flightsystem.com
-  Password: admin123
-
-Regular User:
-  Email: john.doe@example.com
-  Password: password123
-  
-Other users: jane.smith@example.com, mike.johnson@example.com (all use password123)
-```
 
 **⚠️ Important Notes:**
 - The script **deletes all existing data** before populating
